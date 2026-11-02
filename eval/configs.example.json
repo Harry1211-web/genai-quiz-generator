@@ -1,0 +1,5 @@
+[
+  {"name": "large-api", "model": "gpt-4o-mini", "base_url": "https://api.openai.com/v1",
+   "api_key_env": "OPENAI_API_KEY", "price_in": 0.15, "price_out": 0.60},
+  {"name": "small-local", "model": "qwen2.5:7b-instruct", "base_url": "http://localhost:11434/v1"}
+]

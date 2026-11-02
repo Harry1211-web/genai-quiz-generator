@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.env
+reports/output/
+reports/eval/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+eval/configs.json
+data/private/

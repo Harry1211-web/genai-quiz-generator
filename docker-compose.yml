@@ -1,0 +1,19 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    ports: ["8000:8000"]
+  ui:
+    build: .
+    env_file: .env
+    command: ["streamlit", "run", "app/streamlit_app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    ports: ["8501:8501"]
+  # Model local qua Ollama (tùy chọn). Sau khi chạy: docker compose exec ollama ollama pull qwen2.5:7b-instruct
+  # rồi đặt VERIFY_BASE_URL=http://ollama:11434/v1 trong .env
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local"]
+    ports: ["11434:11434"]
+    volumes: ["ollama:/root/.ollama"]
+volumes:
+  ollama:

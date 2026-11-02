@@ -1,0 +1,20 @@
+[
+  {"question": "Cổng mặc định của giao thức HTTPS là cổng nào?",
+   "options": ["443", "80", "8080", "22"], "answer_index": 0,
+   "explanation": "HTTPS mặc định dùng cổng 443; 80 là HTTP, 22 là SSH, 8080 là cổng HTTP thay thế thường dùng khi phát triển.",
+   "level": "remember", "source_quote": "HTTPS sử dụng cổng mặc định 443."},
+  {"question": "Vì sao TCP cần bắt tay ba bước trước khi truyền dữ liệu?",
+   "options": ["Để hai bên đồng bộ số thứ tự ban đầu và xác nhận cả hai chiều đều nhận được",
+               "Để mã hóa dữ liệu trước khi gửi",
+               "Để chọn đường đi ngắn nhất giữa hai máy",
+               "Để nén gói tin cho nhỏ hơn"], "answer_index": 0,
+   "explanation": "Bắt tay ba bước (SYN, SYN-ACK, ACK) giúp hai bên trao đổi số thứ tự ban đầu và xác nhận kết nối hai chiều; mã hóa là việc của TLS, định tuyến là việc của tầng mạng.",
+   "level": "understand", "source_quote": "Bắt tay ba bước giúp hai bên đồng bộ số thứ tự ban đầu."},
+  {"question": "Máy A gửi SYN tới máy chủ nhưng không bao giờ nhận được SYN-ACK. Nguyên nhân nào hợp lý nhất?",
+   "options": ["Tường lửa chặn cổng đích hoặc máy chủ không lắng nghe cổng đó",
+               "Máy A chưa có địa chỉ MAC",
+               "Dữ liệu ứng dụng quá lớn",
+               "Máy chủ đã gửi ACK cuối cùng"], "answer_index": 0,
+   "explanation": "Không có SYN-ACK nghĩa là bước 2 không xảy ra: gói bị chặn hoặc không có tiến trình lắng nghe; dữ liệu ứng dụng chưa được gửi ở giai đoạn này.",
+   "level": "apply", "source_quote": "Máy chủ đang lắng nghe sẽ trả lời bằng gói SYN-ACK."}
+]

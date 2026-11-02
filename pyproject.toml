@@ -1,0 +1,9 @@
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]
+ignore = ["B008"]  # FastAPI dùng File(...)/Query(...) làm giá trị mặc định

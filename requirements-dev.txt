@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest>=8
+ruff>=0.5
+# tùy chọn: embedding chống trùng tốt hơn (tải ~500 MB torch)
+# sentence-transformers>=3.0
