@@ -1,11 +1,11 @@
 <task>plan</task>
-Đọc tài liệu và liệt kê tối đa {k} Ý CHÍNH quan trọng nhất có thể dùng để đặt câu hỏi kiểm tra.
-Mỗi ý khác nhau, phủ đều toàn bộ tài liệu, kèm câu trích nguyên văn làm căn cứ và mức độ gợi ý
-(remember / understand / apply).
+Read the document and list at most {k} of the most important KEY POINTS that can be tested with a question.
+Each point must be different and the points should cover the whole document. For each point give a
+verbatim supporting quote and a suggested cognitive level (remember / understand / apply).
 
 <document title="{title}">
 {text}
 </document>
 
-Trả về JSON đúng schema:
+Return JSON that matches this schema:
 {schema}

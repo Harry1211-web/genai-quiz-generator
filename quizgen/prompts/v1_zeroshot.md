@@ -1,14 +1,14 @@
 <task>generate</task>
-Soạn <n>{n}</n> câu hỏi trắc nghiệm từ tài liệu dưới đây, mức độ: {levels}.
+Write <n>{n}</n> multiple-choice questions from the document below. Cognitive levels: {levels}.
 
-Mức độ nhận thức:
-- remember: nhắc lại định nghĩa, sự kiện
-- understand: giải thích, so sánh, diễn đạt lại
-- apply: áp dụng vào tình huống mới
+Cognitive levels:
+- remember: recall a definition or fact
+- understand: explain, compare, paraphrase
+- apply: use the knowledge in a new situation
 
 <document title="{title}">
 {text}
 </document>
 
-Trả về JSON đúng schema:
+Return JSON that matches this schema:
 {schema}

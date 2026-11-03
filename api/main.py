@@ -23,10 +23,10 @@ async def generate(file: UploadFile = File(...), strategy: str = Query("v3", pat
                    verify: bool = True):
     suffix = Path(file.filename or "x.pdf").suffix.lower()
     if suffix not in {".pdf", ".pptx", ".txt", ".md"}:
-        raise HTTPException(415, "Chỉ nhận PDF, PPTX, TXT, MD")
+        raise HTTPException(415, "Only PDF, PPTX, TXT and MD files are accepted")
     data = await file.read()
     if len(data) > MAX_BYTES:
-        raise HTTPException(413, "File quá lớn (tối đa 10 MB)")
+        raise HTTPException(413, "File too large (max 10 MB)")
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
         f.write(data)
     try:

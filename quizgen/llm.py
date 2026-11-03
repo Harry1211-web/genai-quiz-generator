@@ -1,14 +1,14 @@
-"""Bước 3 – Một interface chung cho mọi LLM.
+"""Step 4 - One interface for every LLM.
 
-- OpenAICompatLLM: gọi endpoint /chat/completions chuẩn OpenAI. Dùng được cho
-  OpenAI, Ollama (http://localhost:11434/v1), Groq, OpenRouter, Gemini (endpoint
-  tương thích OpenAI), vLLM... – chỉ cần đổi LLM_BASE_URL, LLM_MODEL, LLM_API_KEY.
-- FakeLLM: LLM giả, trả JSON hợp lệ dựng từ chính tài liệu. Dùng cho test/CI và
-  để chạy thử toàn bộ pipeline không tốn tiền.
+- OpenAICompatLLM: calls an OpenAI-compatible /chat/completions endpoint. Works with
+  OpenAI, Ollama (http://localhost:11434/v1), Groq, OpenRouter, Gemini (OpenAI-compatible
+  endpoint), vLLM... - only LLM_BASE_URL, LLM_MODEL and LLM_API_KEY change.
+- FakeLLM: a fake LLM that returns valid JSON built from the document itself. Used for
+  tests/CI and for running the whole pipeline at zero cost.
 
-Hàm quan trọng nhất: `generate_json(llm, messages, Schema)` – gọi model, parse
-JSON, validate bằng Pydantic; lỗi thì GỬI LẠI THÔNG BÁO LỖI cho model sửa
-(tối đa `max_retries` lần). Đây là cách đạt ~100% đúng định dạng.
+The key function is `generate_json(llm, messages, Schema)`: call the model, parse the
+JSON, validate it with Pydantic; on failure SEND THE ERROR MESSAGE BACK so the model can
+fix it (up to `max_retries` times). This is how we get ~100% valid output.
 """
 from __future__ import annotations
 
@@ -36,11 +36,11 @@ class Usage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     seconds: float = 0.0
-    format_errors: int = 0  # số lần JSON sai phải thử lại
-    format_failures: int = 0  # số lần hết lượt thử vẫn sai
+    format_errors: int = 0  # times the JSON was invalid and had to be retried
+    format_failures: int = 0  # times it was still invalid after all retries
 
     def cost_usd(self, price_in: float, price_out: float) -> float:
-        """price_* tính theo USD / 1 triệu token."""
+        """price_* are in USD per 1M tokens."""
         return (self.prompt_tokens * price_in + self.completion_tokens * price_out) / 1e6
 
 
@@ -58,11 +58,11 @@ class OpenAICompatLLM:
     model: str
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
-    price_in: float = 0.0  # USD / 1M token đầu vào
+    price_in: float = 0.0  # USD per 1M input tokens
     price_out: float = 0.0
     budget_usd: float = 2.0
     timeout: float = 120.0
-    json_mode: bool = True  # False nếu endpoint không hỗ trợ response_format (lỗi 400)
+    json_mode: bool = True  # False if the endpoint rejects response_format (HTTP 400)
     usage: Usage = field(default_factory=Usage)
 
     @property
@@ -74,13 +74,13 @@ class OpenAICompatLLM:
 
     def chat(self, messages: list[dict], temperature: float = 0.2, json_mode: bool = True) -> str:
         if self.cost_usd() >= self.budget_usd:
-            raise BudgetExceeded(f"Đã dùng ${self.cost_usd():.3f} ≥ ngân sách ${self.budget_usd}")
+            raise BudgetExceeded(f"Spent ${self.cost_usd():.3f} >= budget ${self.budget_usd}")
         body: dict = {"model": self.model, "messages": messages, "temperature": temperature}
         if json_mode and self.json_mode:
             body["response_format"] = {"type": "json_object"}
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         t0 = time.perf_counter()
-        for attempt in range(4):  # retry lỗi mạng / 429 / 5xx với backoff
+        for attempt in range(4):  # retry network errors / 429 / 5xx with exponential backoff
             try:
                 r = httpx.post(f"{self.base_url.rstrip('/')}/chat/completions", json=body,
                                headers=headers, timeout=self.timeout)
@@ -102,7 +102,7 @@ class OpenAICompatLLM:
 
 
 def from_env(prefix: str = "LLM") -> LLM:
-    """Đọc cấu hình từ biến môi trường, ví dụ LLM_MODEL, JUDGE_MODEL..."""
+    """Read config from environment variables with a role prefix: LLM_*, VERIFY_*, JUDGE_*."""
     try:
         from dotenv import load_dotenv
 
@@ -125,7 +125,7 @@ def from_env(prefix: str = "LLM") -> LLM:
 
 # ---------------------------------------------------------------- JSON + retry
 def extract_json(text: str) -> str:
-    """Model hay bọc JSON trong ```json ... ``` hoặc thêm câu dẫn – cắt lấy phần JSON."""
+    """Models often wrap JSON in ```json ... ``` or add a preamble - cut out the JSON part."""
     m = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     if m:
         text = m.group(1)
@@ -151,17 +151,17 @@ def generate_json(llm: LLM, messages: list[dict], schema: type[T], temperature: 
             err = str(e)[:1500]
             msgs = msgs + [
                 {"role": "assistant", "content": raw},
-                {"role": "user", "content": f"JSON của bạn không hợp lệ:\n{err}\n"
-                                            "Hãy trả lại TOÀN BỘ JSON đã sửa, không giải thích."},
+                {"role": "user", "content": f"Your JSON is invalid:\n{err}\n"
+                                            "Return the FULL corrected JSON only, no explanation."},
             ]
     return None
 
 
-# ---------------------------------------------------------------- LLM giả
+# ---------------------------------------------------------------- fake LLM
 @dataclass
 class FakeLLM:
-    """Trả JSON hợp lệ dựng từ câu trong <document>. Không 'thông minh' – chỉ để
-    chạy thử pipeline, viết test và CI. Kết quả đánh giá với FakeLLM vô nghĩa."""
+    """Returns valid JSON built from sentences in <document>. Not 'smart' - only for
+    dry runs, tests and CI. Evaluation results obtained with FakeLLM are meaningless."""
 
     name: str = "fake"
     usage: Usage = field(default_factory=Usage)
@@ -175,7 +175,7 @@ class FakeLLM:
         self.usage.prompt_tokens += len(prompt) // 4
         task = re.search(r"<task>(\w+)</task>", prompt)
         task = task.group(1) if task else "generate"
-        # lấy khối <document ...>...</document> CUỐI CÙNG (system prompt cũng nhắc chữ <document>)
+        # take the LAST <document ...>...</document> block (the system prompt also mentions <document>)
         docs = re.findall(r"<document[^>]*>\n(.*?)</document>", prompt, re.DOTALL)
         doc_text = docs[-1] if docs else prompt
         sents = _sentences(doc_text)
@@ -207,21 +207,21 @@ def _sentences(text: str) -> list[str]:
 
 
 def _cloze(sent: str, all_sents: list[str]) -> dict:
-    """Câu hỏi điền khuyết: che từ dài nhất, đáp án nhiễu = từ dài ở câu khác."""
+    """Cloze question: blank out the longest word; distractors = longest words of other sentences."""
     words = [w.strip(",.;:()\"'") for w in sent.split()]
     key = max(words, key=len)
     pool = [max((w.strip(",.;:()\"'") for w in s.split()), key=len) for s in all_sents if s != sent]
     distract = []
-    for w in pool + ["giao thức", "bộ định tuyến", "tầng ứng dụng", "khung dữ liệu"]:
+    for w in pool + ["protocol", "router", "application layer", "data frame"]:
         if w.lower() != key.lower() and w.lower() not in {d.lower() for d in distract}:
             distract.append(w)
         if len(distract) == 3:
             break
     return {
-        "question": "Điền vào chỗ trống: " + sent.replace(key, "_____", 1),
+        "question": "Fill in the blank: " + sent.replace(key, "_____", 1),
         "options": [key] + distract,
         "answer_index": 0,
-        "explanation": f"Theo tài liệu: \"{sent}\"",
+        "explanation": f"According to the document: \"{sent}\"",
         "level": "remember",
         "source_quote": sent,
     }

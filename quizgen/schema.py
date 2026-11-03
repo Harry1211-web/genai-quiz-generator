@@ -1,7 +1,7 @@
-"""Bước 2 – Schema (Pydantic). LLM phải trả JSON đúng các schema này.
+"""Step 3 - Schemas (Pydantic). The LLM must return JSON that matches these schemas.
 
-Pydantic vừa kiểm tra định dạng, vừa sinh JSON Schema để đưa vào prompt
-(hoặc vào tính năng structured output / tool use của nhà cung cấp).
+Pydantic both validates the output and generates a JSON Schema that is inserted into the
+prompt (or passed to the provider's structured-output / tool-use feature).
 """
 from __future__ import annotations
 
@@ -13,10 +13,10 @@ Level = Literal["remember", "understand", "apply"]
 
 
 class KeyPoint(BaseModel):
-    """Một ý chính có thể đặt câu hỏi (bước 'lập kế hoạch' của prompt v3)."""
+    """A key point that can be tested (the 'plan' step of prompt v3)."""
 
-    point: str = Field(min_length=5, description="Ý chính, một câu")
-    source_quote: str = Field(min_length=5, description="Câu trích nguyên văn trong tài liệu")
+    point: str = Field(min_length=5, description="The key point, one sentence")
+    source_quote: str = Field(min_length=5, description="Verbatim quote from the document")
     suggested_level: Level
 
 
@@ -27,22 +27,23 @@ class KeyPointList(BaseModel):
 class MCQ(BaseModel):
     question: str = Field(min_length=10)
     options: list[str] = Field(min_length=4, max_length=4)
-    answer_index: int = Field(ge=0, le=3)
+    answer_index: int = Field(ge=0, le=3, description="Position of the correct option: 0=A ... 3=D")
     explanation: str = Field(min_length=10)
     level: Level
-    source_quote: str = Field(min_length=5, description="Câu trích NGUYÊN VĂN từ tài liệu làm căn cứ")
+    source_quote: str = Field(min_length=5, description="VERBATIM supporting sentence from the document")
     source_page: int | None = None
 
     @model_validator(mode="after")
     def distinct_options(self) -> MCQ:
         norm = {o.strip().lower().rstrip(".") for o in self.options}
         if len(norm) < 4:
-            raise ValueError("các lựa chọn bị trùng nhau")
+            raise ValueError("options must be distinct")
         if any(not o.strip() for o in self.options):
-            raise ValueError("có lựa chọn rỗng")
-        bad = {"tất cả các đáp án trên", "all of the above", "none of the above", "cả a và b"}
-        if norm & bad:
-            raise ValueError("không dùng lựa chọn kiểu 'tất cả các đáp án trên'")
+            raise ValueError("empty option")
+        # banned in both supported languages
+        banned = {"all of the above", "none of the above", "tất cả các đáp án trên", "cả a và b"}
+        if norm & banned:
+            raise ValueError("do not use options like 'all of the above'")
         return self
 
     @property
@@ -55,14 +56,14 @@ class MCQList(BaseModel):
 
 
 class VerifyAnswer(BaseModel):
-    """Model kiểm tra trả lời lại câu hỏi CHỈ dựa vào đoạn nguồn."""
+    """The verifier model answers the question again using ONLY the source excerpt."""
 
-    answer_index: int = Field(ge=-1, le=3, description="-1 nếu không trả lời được từ đoạn nguồn")
+    answer_index: int = Field(ge=-1, le=3, description="-1 if it cannot be answered from the excerpt")
     reason: str
 
 
 class JudgeScore(BaseModel):
-    """Điểm LLM-as-judge theo rubric 5 tiêu chí (0/1 mỗi tiêu chí)."""
+    """LLM-as-judge score on the 5-criterion rubric (0/1 per criterion)."""
 
     factual: int = Field(ge=0, le=1)
     answerable: int = Field(ge=0, le=1)

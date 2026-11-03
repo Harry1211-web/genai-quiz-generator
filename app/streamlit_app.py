@@ -1,4 +1,4 @@
-"""Giao diện: tải bài giảng → sinh → duyệt/sửa → xuất. Chạy: streamlit run app/streamlit_app.py"""
+"""UI: upload a lecture -> generate -> review/edit -> export. Run: streamlit run app/streamlit_app.py"""
 import sys
 import tempfile
 from pathlib import Path
@@ -14,28 +14,28 @@ from quizgen.schema import MCQ
 
 MAX_MB = 10
 st.set_page_config(page_title="GenAI Quiz Generator", layout="wide")
-st.title("Tạo câu hỏi ôn tập từ bài giảng")
-st.caption("Tài liệu chỉ được xử lý trong phiên làm việc này, không lưu lại.")
+st.title("Generate review questions from a lecture")
+st.caption("Uploaded files are processed in this session only and are not stored.")
 
 with st.sidebar:
-    strategy = st.selectbox("Chiến lược prompt", ["v3", "v2", "v1"],
+    strategy = st.selectbox("Prompting strategy", ["v3", "v2", "v1"],
                             format_func=lambda s: {"v1": "v1 zero-shot", "v2": "v2 few-shot",
-                                                   "v3": "v3 lập kế hoạch → sinh"}[s])
-    n = st.slider("Số câu mỗi phần", 1, 5, 3)
-    max_sections = st.slider("Số phần tối đa", 1, 20, 6)
-    verify = st.checkbox("Kiểm chứng bằng model thứ hai", value=True)
+                                                   "v3": "v3 plan -> generate"}[s])
+    n = st.slider("Questions per section", 1, 5, 3)
+    max_sections = st.slider("Max sections", 1, 20, 6)
+    verify = st.checkbox("Verify with a second model", value=True)
 
-up = st.file_uploader("Bài giảng (PDF, PPTX, TXT, MD)", type=["pdf", "pptx", "txt", "md"])
+up = st.file_uploader("Lecture (PDF, PPTX, TXT, MD)", type=["pdf", "pptx", "txt", "md"])
 if up and up.size > MAX_MB * 1024 * 1024:
-    st.error(f"File lớn hơn {MAX_MB} MB")
+    st.error(f"File is larger than {MAX_MB} MB")
     st.stop()
 
-if up and st.button("Sinh câu hỏi", type="primary"):
+if up and st.button("Generate questions", type="primary"):
     with tempfile.NamedTemporaryFile(suffix=Path(up.name).suffix, delete=False) as f:
         f.write(up.getvalue())
     sections = load_sections(f.name)
     Path(f.name).unlink(missing_ok=True)
-    with st.spinner(f"Đang xử lý {min(len(sections), max_sections)} phần..."):
+    with st.spinner(f"Processing {min(len(sections), max_sections)} sections..."):
         qs, stats = run(sections, from_env("LLM"), from_env("VERIFY") if verify else None,
                         n, strategy, max_sections)
     st.session_state["qs"] = [q.to_dict() for q in qs]
@@ -44,11 +44,11 @@ if up and st.button("Sinh câu hỏi", type="primary"):
 if "qs" in st.session_state:
     stats = st.session_state["stats"]
     c = st.columns(4)
-    c[0].metric("Câu sinh ra", stats["total"])
-    c[1].metric("Qua kiểm chứng", stats["accepted"])
-    c[2].metric("Thời gian (s)", stats["seconds"])
-    c[3].metric("Chi phí (USD)", stats["cost_usd"])
-    show_rejected = st.toggle("Hiện cả câu bị loại", value=False)
+    c[0].metric("Generated", stats["total"])
+    c[1].metric("Passed verification", stats["accepted"])
+    c[2].metric("Time (s)", stats["seconds"])
+    c[3].metric("Cost (USD)", stats["cost_usd"])
+    show_rejected = st.toggle("Show rejected questions", value=False)
     kept: list[MCQ] = []
     for i, d in enumerate(st.session_state["qs"]):
         if d["rejected"] and not show_rejected:
@@ -56,22 +56,22 @@ if "qs" in st.session_state:
         warn = f"  ⚠ {d['rejected']}" if d["rejected"] else ""
         label = f"{i + 1}. [{d['level']}] {d['question'][:90]}{warn}"
         with st.expander(label):
-            q = st.text_area("Câu hỏi", d["question"], key=f"q{i}")
-            opts = [st.text_input(f"Lựa chọn {'ABCD'[j]}", o, key=f"o{i}{j}")
+            q = st.text_area("Question", d["question"], key=f"q{i}")
+            opts = [st.text_input(f"Option {'ABCD'[j]}", o, key=f"o{i}{j}")
                     for j, o in enumerate(d["options"])]
-            ans = st.radio("Đáp án đúng", range(4), index=d["answer_index"], key=f"a{i}",
+            ans = st.radio("Correct answer", range(4), index=d["answer_index"], key=f"a{i}",
                            format_func=lambda j: "ABCD"[j], horizontal=True)
-            exp = st.text_area("Giải thích", d["explanation"], key=f"e{i}")
-            st.info(f"Nguồn (trang {d['source_page']}): “{d['source_quote']}”")
-            keep = st.checkbox("Giữ câu này", value=not d["rejected"], key=f"k{i}")
+            exp = st.text_area("Explanation", d["explanation"], key=f"e{i}")
+            st.info(f"Source (page {d['source_page']}): “{d['source_quote']}”")
+            keep = st.checkbox("Keep this question", value=not d["rejected"], key=f"k{i}")
         if keep:
             try:
                 kept.append(MCQ(question=q, options=opts, answer_index=ans, explanation=exp,
                                 level=d["level"], source_quote=d["source_quote"],
                                 source_page=d["source_page"]))
-            except Exception as e:  # câu bị sửa sai định dạng
-                st.warning(f"Câu {i + 1} không hợp lệ: {e}")
-    st.subheader(f"Xuất {len(kept)} câu")
+            except Exception as e:  # the edited question is no longer valid
+                st.warning(f"Question {i + 1} is invalid: {e}")
+    st.subheader(f"Export {len(kept)} questions")
     c = st.columns(3)
     c[0].download_button("JSON", to_json(kept), "quiz.json")
     c[1].download_button("CSV", to_csv(kept), "quiz.csv")

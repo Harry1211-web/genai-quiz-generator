@@ -1,11 +1,11 @@
-"""Bước 5 – Kiểm chứng tự động trước khi đưa câu hỏi cho người dùng.
+"""Step 6 - Automatic verification before questions reach the user.
 
-Từ rẻ đến đắt:
-1. quote_not_found : source_quote không có trong tài liệu (model bịa căn cứ)
-2. answer_leak     : đáp án đúng dài bất thường so với nhiễu (dễ đoán)
-3. answer_mismatch : model kiểm tra, chỉ đọc đoạn nguồn, chọn đáp án khác
-4. unanswerable    : model kiểm tra nói không trả lời được từ đoạn nguồn
-(duplicate do dedupe.py gắn)
+From cheapest to most expensive:
+1. quote_not_found : source_quote is not in the document (the model invented its evidence)
+2. answer_leak     : the correct option is unusually long compared with the distractors (easy to guess)
+3. answer_mismatch : a verifier model, reading only the source excerpt, picks a different option
+4. unanswerable    : the verifier model says the excerpt is not enough to answer
+(duplicate is added by dedupe.py)
 """
 from __future__ import annotations
 
@@ -27,13 +27,13 @@ def _norm(s: str) -> str:
 
 
 def quote_in_source(quote: str, source: str, threshold: float = 0.85) -> bool:
-    """Khớp mờ: model hay sửa nhẹ dấu câu/khoảng trắng khi trích."""
+    """Fuzzy match: models often change punctuation or whitespace slightly when quoting."""
     q, s = _norm(quote), _norm(source)
     if not q:
         return False
     if q in s:
         return True
-    # trượt cửa sổ cùng độ dài, lấy tỉ lệ giống cao nhất
+    # slide a window of the same length over the source, keep the best similarity ratio
     n = len(q)
     step = max(1, n // 4)
     best = 0.0
@@ -45,11 +45,11 @@ def quote_in_source(quote: str, source: str, threshold: float = 0.85) -> bool:
 
 
 def find_context(quote: str, source: str, window: int = 600) -> str:
-    """Lấy đoạn quanh câu trích để model kiểm tra đọc (không đưa cả bài)."""
+    """Return the text around the quote for the verifier (not the whole section)."""
     idx = _norm(source).find(_norm(quote)[:40])
     if idx == -1:
         return source[: window * 2]
-    # vị trí trên chuỗi chuẩn hóa xấp xỉ vị trí gốc – đủ dùng
+    # the position in the normalized string approximates the original position - good enough
     return source[max(0, idx - window) : idx + window]
 
 
@@ -81,8 +81,9 @@ def check_answer_back(llm: LLM, q: GeneratedQuestion, section: Section) -> list[
 
 def verify_all(questions: list[GeneratedQuestion], sections: dict[str, Section],
                verifier: LLM | None = None) -> list[GeneratedQuestion]:
-    """verifier nên là model KHÁC model sinh (hoặc ít nhất temperature 0) để giảm
-    'tự chấm bài mình'. Bỏ qua bước 3–4 nếu verifier=None (tiết kiệm)."""
+    """The verifier should be a DIFFERENT model from the generator (or at least run at
+    temperature 0) so a model does not grade its own work. Steps 3-4 are skipped when
+    verifier=None (cheaper)."""
     for q in questions:
         sec = sections[q.section_title]
         q.rejected += check_static(q, sec)

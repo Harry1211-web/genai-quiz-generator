@@ -1,4 +1,4 @@
-"""LLM-as-judge: chấm câu hỏi theo cùng rubric với người chấm."""
+"""LLM-as-judge: grade questions with the same rubric as the human rater."""
 from __future__ import annotations
 
 import json

@@ -1,7 +1,7 @@
-"""Sau khi chấm tay xong labeling_sheet.csv: ghép với key.csv → bảng chất lượng theo
-model × strategy (điểm NGƯỜI chấm) + kappa judge–người.
+"""After rating labeling_sheet.csv by hand: join with key.csv -> quality table per
+model x strategy (HUMAN scores) + judge-vs-human kappa.
 
-Chạy: python -m eval.report reports/eval
+Run: python -m eval.report reports/eval
 """
 from __future__ import annotations
 
@@ -23,10 +23,10 @@ def main(folder: str) -> None:
     m["all_pass"] = (m[RUBRIC_KEYS].sum(axis=1) == len(RUBRIC_KEYS)).astype(int)
     q = m.groupby(["config", "strategy"])[RUBRIC_KEYS + ["all_pass"]].mean().round(3)
     q["n_rated"] = m.groupby(["config", "strategy"]).size()
-    text = "## Chất lượng (chấm tay)\n\n" + q.reset_index().to_markdown(index=False)
+    text = "## Quality (human ratings)\n\n" + q.reset_index().to_markdown(index=False)
     if (d / "judge_labels.csv").exists():
         kt = kappa_table(human[["id"] + RUBRIC_KEYS], pd.read_csv(d / "judge_labels.csv"))
-        text += "\n\n## Đồng thuận LLM-as-judge với người chấm\n\n" + kt.to_markdown(index=False)
+        text += "\n\n## LLM-as-judge agreement with human ratings\n\n" + kt.to_markdown(index=False)
     (d / "quality_report.md").write_text(text, encoding="utf-8")
     print(text)
 

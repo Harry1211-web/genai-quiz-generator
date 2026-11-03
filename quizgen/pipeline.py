@@ -1,4 +1,4 @@
-"""Ghép các bước: trích xuất → sinh → kiểm chứng → chống trùng. Dùng bởi CLI, API, giao diện."""
+"""Glue for all steps: extract -> generate -> verify -> dedupe. Used by the CLI, the API and the UI."""
 from __future__ import annotations
 
 import argparse
@@ -34,19 +34,19 @@ def run(sections: list[Section], llm: LLM, verifier: LLM | None = None, n_per_se
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Sinh câu hỏi ôn tập từ bài giảng")
-    ap.add_argument("file", help="PDF / .txt / .md")
+    ap = argparse.ArgumentParser(description="Generate review questions from a lecture")
+    ap.add_argument("file", help="PDF / PPTX / TXT / MD")
     ap.add_argument("--strategy", choices=STRATEGIES, default="v3")
-    ap.add_argument("--n", type=int, default=3, help="số câu mỗi phần")
+    ap.add_argument("--n", type=int, default=3, help="questions per section")
     ap.add_argument("--max-sections", type=int)
-    ap.add_argument("--no-verify", action="store_true", help="bỏ bước trả lời lại (tiết kiệm)")
+    ap.add_argument("--no-verify", action="store_true", help="skip the answer-back verification (cheaper)")
     ap.add_argument("--out", default="reports/output")
     a = ap.parse_args()
 
     llm = from_env("LLM")
     verifier = None if a.no_verify else from_env("VERIFY")
     sections = load_sections(a.file)
-    print(f"{len(sections)} phần: " + ", ".join(s.title for s in sections[:8]))
+    print(f"{len(sections)} sections: " + ", ".join(s.title for s in sections[:8]))
     qs, stats = run(sections, llm, verifier, a.n, a.strategy, a.max_sections)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)

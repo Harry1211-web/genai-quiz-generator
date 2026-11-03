@@ -1,8 +1,8 @@
-"""Tạo dữ liệu fine-tune (SFT) từ câu hỏi ĐÃ ĐƯỢC NGƯỜI DUYỆT (all 5 tiêu chí = 1).
+"""Build fine-tuning (SFT) data from HUMAN-APPROVED questions (all 5 rubric criteria = 1).
 
-QUAN TRỌNG – chống rò rỉ: chỉ lấy câu từ các tài liệu KHÔNG nằm trong tập đánh giá.
-Chạy: python -m eval.make_sft_data reports/eval --exclude-docs mang_may_tinh_tcp.md
-Đầu ra: data/sft/train.jsonl (định dạng chat messages)
+IMPORTANT - avoid leakage: only use questions from documents that are NOT in the evaluation set.
+Run: python -m eval.make_sft_data reports/eval --exclude-docs transport_layer_tcp_udp.md
+Output: data/sft/train.jsonl (chat-messages format)
 """
 from __future__ import annotations
 
@@ -45,14 +45,14 @@ def main() -> None:
                                      ["question", "options", "answer_index", "explanation", "level",
                                       "source_quote"]}]}
             target["questions"][0]["answer_index"] = int(target["questions"][0]["answer_index"])
-            user = (f"Soạn 1 câu hỏi trắc nghiệm mức {r['level']} từ tài liệu.\n"
+            user = (f"Write 1 multiple-choice question at level {r['level']} from the document.\n"
                     f"<document>\n{sec.text}\n</document>")
             f.write(json.dumps({"messages": [
                 {"role": "system", "content": system}, {"role": "user", "content": user},
                 {"role": "assistant", "content": json.dumps(target, ensure_ascii=False)}]},
                 ensure_ascii=False) + "\n")
             n += 1
-    print(f"Ghi {n} mẫu vào {out}. Cần ít nhất ~300 mẫu để LoRA có ý nghĩa.")
+    print(f"Wrote {n} examples to {out}. LoRA needs at least ~300 examples to be meaningful.")
 
 
 if __name__ == "__main__":

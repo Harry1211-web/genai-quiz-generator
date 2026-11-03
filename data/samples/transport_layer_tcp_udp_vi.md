@@ -1,6 +1,6 @@
 # Bài 3. Tầng giao vận: TCP và UDP
 
-Tài liệu mẫu do tác giả repo tự viết để demo, phát hành theo giấy phép CC BY 4.0.
+Tài liệu mẫu do tác giả repo tự viết để demo, phát hành theo giấy phép CC BY 4.0 (Vietnamese version of transport_layer_tcp_udp.md).
 
 ## 3.1 Vai trò của tầng giao vận
 

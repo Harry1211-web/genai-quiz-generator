@@ -1,5 +1,5 @@
 -r requirements.txt
 pytest>=8
 ruff>=0.5
-# tùy chọn: embedding chống trùng tốt hơn (tải ~500 MB torch)
+# optional: better semantic dedup with embeddings (pulls ~500 MB of torch)
 # sentence-transformers>=3.0

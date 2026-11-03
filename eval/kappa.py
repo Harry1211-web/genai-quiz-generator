@@ -1,12 +1,12 @@
-"""Cohen's kappa giữa chấm tay và LLM-as-judge, theo từng tiêu chí rubric.
+"""Cohen's kappa between human ratings and LLM-as-judge, per rubric criterion.
 
 kappa = (p_o - p_e) / (1 - p_e)
-  p_o: tỉ lệ hai bên chấm giống nhau
-  p_e: tỉ lệ giống nhau do ngẫu nhiên (từ phân bố điểm của mỗi bên)
-Đọc: < 0,4 kém · 0,4–0,6 vừa · 0,6–0,8 tốt · > 0,8 rất tốt
+  p_o: observed agreement (share of items both raters scored the same)
+  p_e: agreement expected by chance (from each rater's score distribution)
+Reading: < 0.4 poor · 0.4-0.6 moderate · 0.6-0.8 good · > 0.8 very good
 
-Chạy: python -m eval.kappa eval/human_labels.csv eval/judge_labels.csv
-Hai file cùng cột id + 5 cột rubric.
+Run: python -m eval.kappa eval/human_labels.csv eval/judge_labels.csv
+Both files have an id column + the 5 rubric columns.
 """
 from __future__ import annotations
 
@@ -18,12 +18,12 @@ from quizgen.schema import RUBRIC_KEYS
 
 
 def cohen_kappa(a: list[int], b: list[int]) -> float:
-    assert len(a) == len(b) and a, "hai danh sách phải cùng độ dài, không rỗng"
+    assert len(a) == len(b) and a, "both lists must have the same non-zero length"
     n = len(a)
     labels = sorted(set(a) | set(b))
     p_o = sum(x == y for x, y in zip(a, b, strict=True)) / n
     p_e = sum((a.count(c) / n) * (b.count(c) / n) for c in labels)
-    if p_e == 1:  # cả hai chấm toàn một giá trị
+    if p_e == 1:  # both raters gave a single constant score
         return 1.0 if p_o == 1 else 0.0
     return (p_o - p_e) / (1 - p_e)
 

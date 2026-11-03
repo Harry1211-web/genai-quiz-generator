@@ -5,8 +5,8 @@ from api.main import app
 
 def test_generate_endpoint():
     c = TestClient(app)
-    with open("data/samples/mang_may_tinh_tcp.md", "rb") as f:
-        r = c.post("/generate?n=1&max_sections=2&strategy=v2", files={"file": ("bai.md", f, "text/markdown")})
+    with open("data/samples/transport_layer_tcp_udp.md", "rb") as f:
+        r = c.post("/generate?n=1&max_sections=2&strategy=v2", files={"file": ("l.md", f, "text/markdown")})
     assert r.status_code == 200
     body = r.json()
     assert body["stats"]["total"] >= 1 and "questions" in body

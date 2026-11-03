@@ -1,19 +1,19 @@
-"""Thí nghiệm chính: mỗi model × mỗi chiến lược prompt trên cùng bộ tài liệu.
+"""Main experiment: every model x every prompting strategy on the same documents.
 
-Kết quả:
-  reports/eval/questions.csv     – mọi câu sinh ra (kể cả bị loại), có id
-  reports/eval/labeling_sheet.csv– bảng CHẤM TAY: đã xáo trộn, ẨN model/strategy
-  reports/eval/key.csv           – bảng khóa id → model/strategy (đừng mở khi đang chấm)
-  reports/eval/judge_labels.csv  – điểm LLM-as-judge
-  reports/eval/comparison.md     – bảng so sánh
+Outputs:
+  reports/eval/questions.csv      - every generated question (including rejected ones), with an id
+  reports/eval/labeling_sheet.csv - HUMAN rating sheet: shuffled, model/strategy HIDDEN (blind rating)
+  reports/eval/key.csv            - id -> model/strategy key (do not open while rating)
+  reports/eval/judge_labels.csv   - LLM-as-judge scores
+  reports/eval/comparison.md      - comparison table
 
-Cấu hình model qua file YAML-lite (JSON) eval/configs.json, ví dụ:
+Models are configured in eval/configs.json, for example:
 [
   {"name": "large", "model": "gpt-4o-mini", "base_url": "https://api.openai.com/v1",
    "api_key_env": "OPENAI_API_KEY", "price_in": 0.15, "price_out": 0.6},
   {"name": "small", "model": "qwen2.5:7b-instruct", "base_url": "http://localhost:11434/v1"}
 ]
-Chạy: python -m eval.run_eval data/samples --n 3 --max-sections 6
+Run: python -m eval.run_eval data/samples --n 3 --max-sections 6
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def make_llm(cfg: dict):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("docs", help="thư mục tài liệu (pdf/txt/md)")
+    ap.add_argument("docs", help="folder of documents (pdf/pptx/txt/md)")
     ap.add_argument("--configs", default="eval/configs.json")
     ap.add_argument("--strategies", default="v1,v2,v3")
     ap.add_argument("--n", type=int, default=3)
@@ -74,7 +74,7 @@ def main() -> None:
                         if js:
                             d.update({f"judge_{k}": getattr(js, k) for k in RUBRIC_KEYS})
                     rows.append(d)
-            # cộng dồn số liệu cả các tài liệu cho cặp (model, strategy)
+            # usage is accumulated over all documents for each (model, strategy) pair
             stats.append({"config": cfg["name"], "strategy": strat, "calls": llm.usage.calls,
                           "format_errors": llm.usage.format_errors,
                           "format_failures": llm.usage.format_failures,
@@ -86,7 +86,7 @@ def main() -> None:
     df.insert(0, "id", [f"q{i:04d}" for i in range(len(df))])
     df.to_csv(out / "questions.csv", index=False)
 
-    # Bảng chấm tay: chỉ câu đã qua kiểm chứng, xáo trộn, ẩn cấu hình (chấm mù)
+    # Human rating sheet: only verified questions, shuffled, configuration hidden (blind rating)
     ok = df[df["rejected"].fillna("") == ""].sample(frac=1, random_state=42)
     sheet = ok[["id", "doc", "section", "question", "options", "answer_index", "explanation", "level",
                 "source_quote"]].copy()
@@ -102,7 +102,7 @@ def main() -> None:
         jl.columns = ["id"] + RUBRIC_KEYS
         jl.to_csv(out / "judge_labels.csv", index=False)
 
-    # Bảng so sánh (theo kiểm chứng tự động + judge; khi có chấm tay dùng eval.report)
+    # Comparison table (automatic checks + judge; once human ratings exist use eval.report)
     g = df.groupby(["config", "strategy"])
     comp = pd.DataFrame({
         "questions": g.size(),
@@ -114,7 +114,7 @@ def main() -> None:
     comp = comp.merge(pd.DataFrame(stats), on=["config", "strategy"])
     (out / "comparison.md").write_text(comp.to_markdown(index=False), encoding="utf-8")
     print(comp.to_markdown(index=False))
-    print(f"\nĐã ghi {out}/ – chấm tay file labeling_sheet.csv (0/1 mỗi cột rubric).")
+    print(f"\nWrote {out}/ - rate labeling_sheet.csv by hand (0/1 in each rubric column).")
 
 
 if __name__ == "__main__":

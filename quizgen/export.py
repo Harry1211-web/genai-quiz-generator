@@ -1,4 +1,4 @@
-"""Bước 7 – Xuất JSON, CSV, GIFT (định dạng nhập câu hỏi của Moodle)."""
+"""Step 7 - Export to JSON, CSV and GIFT (Moodle's question import format)."""
 from __future__ import annotations
 
 import csv
@@ -18,8 +18,8 @@ def gift_escape(s: str) -> str:
 
 
 def to_gift(questions: list[MCQ], prefix: str = "q") -> str:
-    """Ví dụ một câu:
-    ::q1:: Cổng mặc định của HTTPS? {=443 ~80 ~8080 ~22 ####Giải thích}
+    """Example of one question:
+    ::q1:: Default port of HTTPS? {=443 ~80 ~8080 ~22 ####Explanation}
     """
     blocks = []
     for i, q in enumerate(questions, 1):

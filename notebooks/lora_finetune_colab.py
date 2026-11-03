@@ -1,8 +1,8 @@
 # %% [markdown]
-# # LoRA fine-tune model nhỏ sinh câu hỏi (chạy trên Google Colab, GPU T4 miễn phí)
-# Mục tiêu thí nghiệm: model nhỏ + LoRA có đuổi kịp model nhỏ + prompt tốt nhất / model lớn không?
-# 1. Upload data/sft/train.jsonl lên Colab.  2. Runtime → Change runtime type → T4 GPU.
-# Ghi lại phiên bản thư viện bạn dùng vào README (API của trl thay đổi khá nhanh).
+# # LoRA fine-tuning of a small question-generation model (Google Colab, free T4 GPU)
+# Experiment: does small model + LoRA catch up with small model + best prompt, or with the large model?
+# 1. Upload data/sft/train.jsonl to Colab.  2. Runtime -> Change runtime type -> T4 GPU.
+# Record the library versions you used in the README (the trl API changes quickly).
 
 # %%
 # !pip install -q "transformers>=4.44" "peft>=0.12" "trl>=0.10" "datasets>=2.20" "accelerate>=0.33"
@@ -14,15 +14,15 @@ from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 
-BASE = "Qwen/Qwen2.5-1.5B-Instruct"   # nhỏ, hỗ trợ tiếng Việt, vừa T4 16 GB
+BASE = "Qwen/Qwen2.5-1.5B-Instruct"   # small, supports Vietnamese, fits a 16 GB T4
 ds = load_dataset("json", data_files="train.jsonl")["train"].train_test_split(test_size=0.1, seed=42)
 
 tok = AutoTokenizer.from_pretrained(BASE)
 model = AutoModelForCausalLM.from_pretrained(BASE, torch_dtype=torch.float16, device_map="auto")
 
 # %% [markdown]
-# LoRA: đóng băng toàn bộ trọng số gốc W, chỉ học hai ma trận nhỏ A (r×k) và B (d×r):
-# W' = W + (alpha/r)·B·A. Với r = 16, số tham số học được chỉ khoảng 1% model.
+# LoRA freezes the original weights W and only learns two small matrices A (r x k) and B (d x r):
+# W' = W + (alpha/r) * B * A. With r = 16 only about 1% of the parameters are trained.
 
 # %%
 lora = LoraConfig(r=16, lora_alpha=32, lora_dropout=0.05, task_type="CAUSAL_LM",
@@ -32,16 +32,16 @@ cfg = SFTConfig(output_dir="lora-quizgen", num_train_epochs=3, per_device_train_
                 eval_strategy="epoch", save_strategy="epoch", fp16=True, max_seq_length=2048,
                 report_to="none")
 trainer = SFTTrainer(model=model, args=cfg, train_dataset=ds["train"], eval_dataset=ds["test"],
-                     peft_config=lora, processing_class=tok)  # trl cũ: tokenizer=tok
+                     peft_config=lora, processing_class=tok)  # older trl versions: tokenizer=tok
 trainer.print_trainable_parameters() if hasattr(trainer, "print_trainable_parameters") else None
 trainer.train()
-trainer.save_model("lora-quizgen")   # chỉ lưu adapter (~vài chục MB)
+trainer.save_model("lora-quizgen")   # saves only the adapter (tens of MB)
 
 # %% [markdown]
-# ## Thử sinh và đưa vào thí nghiệm
-# Cách đơn giản nhất để so sánh công bằng: merge adapter, xuất GGUF, nạp vào Ollama, rồi thêm
-# một dòng "small-lora" vào eval/configs.json và chạy lại eval.run_eval trên TẬP ĐÁNH GIÁ
-# (tài liệu không dùng để tạo train.jsonl).
+# ## Try it and add it to the experiment
+# Simplest fair comparison: merge the adapter, export to GGUF, load it in Ollama, add a
+# "small-lora" entry to eval/configs.json and re-run eval.run_eval on the EVALUATION SET
+# (documents that were not used to build train.jsonl).
 
 # %%
 msgs = ds["test"][0]["messages"][:2]

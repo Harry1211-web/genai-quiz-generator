@@ -1,8 +1,10 @@
-"""Bước 6 – Chống trùng câu hỏi bằng độ tương đồng.
+"""Step 6b - Remove near-duplicate questions by similarity.
 
-Mặc định dùng embedding đa ngôn ngữ (sentence-transformers) nếu đã cài;
-không có thì dùng TF-IDF n-gram ký tự (chạy được ngay, không cần GPU).
-Câu nào giống một câu ĐÃ GIỮ với cosine > threshold thì gắn 'duplicate'.
+Uses a multilingual embedding model (sentence-transformers) when installed; otherwise
+falls back to character n-gram TF-IDF (works immediately, no GPU, but only catches
+surface-level duplicates, not paraphrases).
+A question whose cosine similarity to an already KEPT question exceeds the threshold
+is tagged 'duplicate'.
 """
 from __future__ import annotations
 

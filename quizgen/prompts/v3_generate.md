@@ -1,16 +1,16 @@
 <task>generate</task>
-Soạn <n>{n}</n> câu hỏi trắc nghiệm, MỖI CÂU cho MỘT ý trong danh sách ý chính dưới đây (theo thứ tự),
-dùng mức độ gợi ý của từng ý. Không hỏi lại cùng một ý.
+Write <n>{n}</n> multiple-choice questions, ONE question for EACH key point below (in order),
+using the suggested level of each point. Do not ask about the same point twice.
 
-Ý chính:
+Key points:
 {points}
 
-Ví dụ câu hỏi TỐT (tài liệu khác, chỉ để tham khảo cách viết):
+Examples of GOOD questions (from a different document, for style reference only):
 {examples}
 
 <document title="{title}">
 {text}
 </document>
 
-Trả về JSON đúng schema:
+Return JSON that matches this schema:
 {schema}

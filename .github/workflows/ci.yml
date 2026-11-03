@@ -9,4 +9,4 @@ jobs:
         with: {python-version: "3.11"}
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
-      - run: pytest -q   # dùng FakeLLM – không gọi API trả phí
+      - run: pytest -q   # uses FakeLLM - no paid API calls

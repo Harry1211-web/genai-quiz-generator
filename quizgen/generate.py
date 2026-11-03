@@ -1,8 +1,8 @@
-"""Bước 4 – Sinh câu hỏi theo 3 chiến lược prompt.
+"""Step 5 - Generate questions with 3 prompting strategies.
 
-v1 zero-shot      : 1 lần gọi, không ví dụ
-v2 few-shot       : 1 lần gọi, có 3 ví dụ tốt
-v3 plan → generate: gọi 1 lần lấy ý chính, gọi lần 2 sinh câu hỏi theo từng ý
+v1 zero-shot      : 1 call, no examples
+v2 few-shot       : 1 call, 3 good examples
+v3 plan -> generate: call 1 extracts key points, call 2 writes one question per point
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ class GeneratedQuestion:
     model: str
     page_start: int
     page_end: int
-    rejected: list[str] = field(default_factory=list)  # lý do bị kiểm chứng loại
+    rejected: list[str] = field(default_factory=list)  # reasons the verification step rejected it
 
     @property
     def ok(self) -> bool:
@@ -58,8 +58,8 @@ def generate_for_section(llm: LLM, section: Section, n: int = 3, strategy: str =
                          levels: str = "remember, understand, apply",
                          temperature: float = 0.3, seed: int | None = None) -> list[GeneratedQuestion]:
     system = {"role": "system", "content": load_prompt("system.md")}
-    fmt = dict(n=n, levels=levels, title=section.title, text=section.text,
-               schema=_schema(MCQList), examples=_examples())
+    fmt = {"n": n, "levels": levels, "title": section.title, "text": section.text,
+           "schema": _schema(MCQList), "examples": _examples()}
     if strategy == "v1":
         user = load_prompt("v1_zeroshot.md").format(**fmt)
     elif strategy == "v2":
@@ -71,11 +71,11 @@ def generate_for_section(llm: LLM, section: Section, n: int = 3, strategy: str =
                              temperature=0.0)
         if plan is None:
             return []
-        points = "\n".join(f"{i + 1}. [{p.suggested_level}] {p.point}  (căn cứ: \"{p.source_quote}\")"
+        points = "\n".join(f"{i + 1}. [{p.suggested_level}] {p.point}  (evidence: \"{p.source_quote}\")"
                            for i, p in enumerate(plan.points[:n]))
         user = load_prompt("v3_generate.md").format(points=points, **fmt)
     else:
-        raise ValueError(f"strategy phải là một trong {STRATEGIES}")
+        raise ValueError(f"strategy must be one of {STRATEGIES}")
 
     result = generate_json(llm, [system, {"role": "user", "content": user}], MCQList,
                            temperature=temperature)
@@ -93,7 +93,7 @@ def generate_for_section(llm: LLM, section: Section, n: int = 3, strategy: str =
 
 
 def shuffle_options(q: MCQ, rng: random.Random) -> MCQ:
-    """Model hay đặt đáp án đúng ở vị trí A → xáo trộn để phân bố đều."""
+    """Models tend to put the correct answer in position A -> shuffle so positions are balanced."""
     order = list(range(4))
     rng.shuffle(order)
     options = [q.options[i] for i in order]
