@@ -1,20 +1,67 @@
 [
-  {"question": "What is the default port of the HTTPS protocol?",
-   "options": ["443", "80", "8080", "22"], "answer_index": 0,
-   "explanation": "HTTPS uses port 443 by default; 80 is HTTP, 22 is SSH, and 8080 is a common alternative HTTP port during development.",
-   "level": "remember", "source_quote": "HTTPS uses default port 443."},
-  {"question": "Why does TCP perform a three-way handshake before sending data?",
-   "options": ["So both sides synchronize their initial sequence numbers and confirm that both directions work",
-               "To encrypt the data before sending it",
-               "To choose the shortest path between the two hosts",
-               "To compress packets so they are smaller"], "answer_index": 0,
-   "explanation": "The handshake (SYN, SYN-ACK, ACK) lets both sides exchange initial sequence numbers and confirm a two-way connection; encryption is TLS's job and routing belongs to the network layer.",
-   "level": "understand", "source_quote": "The three-way handshake lets both sides synchronize their initial sequence numbers."},
-  {"question": "Host A sends a SYN to a server but never receives a SYN-ACK. What is the most likely cause?",
-   "options": ["A firewall blocks the destination port or no process is listening on it",
-               "Host A does not have a MAC address yet",
-               "The application data is too large",
-               "The server already sent the final ACK"], "answer_index": 0,
-   "explanation": "No SYN-ACK means step 2 never happened: the packet was blocked or nothing is listening; application data has not been sent at this stage.",
-   "level": "apply", "source_quote": "A listening server replies with a SYN-ACK segment."}
+  {
+    "question": "What is the default port of the HTTPS protocol?",
+    "options": [
+      "443",
+      "80",
+      "8080",
+      "22"
+    ],
+    "answer_index": 0,
+    "explanation": "HTTPS uses port 443 by default; 80 is HTTP, 22 is SSH, and 8080 is a common alternative HTTP port during development.",
+    "level": "remember",
+    "source_quote": "HTTPS uses default port 443."
+  },
+  {
+    "question": "Why does TCP perform a three-way handshake before sending data?",
+    "options": [
+      "So both sides synchronize their initial sequence numbers and confirm that both directions work",
+      "To encrypt the data before sending it",
+      "To choose the shortest path between the two hosts",
+      "To compress packets so they are smaller"
+    ],
+    "answer_index": 0,
+    "explanation": "The handshake (SYN, SYN-ACK, ACK) lets both sides exchange initial sequence numbers and confirm a two-way connection; encryption is TLS's job and routing belongs to the network layer.",
+    "level": "understand",
+    "source_quote": "The three-way handshake lets both sides synchronize their initial sequence numbers."
+  },
+  {
+    "question": "Host A sends a SYN to a server but never receives a SYN-ACK. What is the most likely cause?",
+    "options": [
+      "A firewall blocks the destination port or no process is listening on it",
+      "Host A does not have a MAC address yet",
+      "The application data is too large",
+      "The server already sent the final ACK"
+    ],
+    "answer_index": 0,
+    "explanation": "No SYN-ACK means step 2 never happened: the packet was blocked or nothing is listening; application data has not been sent at this stage.",
+    "level": "apply",
+    "source_quote": "A listening server replies with a SYN-ACK segment."
+  },
+  {
+    "question": "Why is a public cloud considered less secure than a private cloud?",
+    "options": [
+      "Because the data is stored alongside other organizations' data",
+      "Because public clouds use a pay-as-you-go pricing model",
+      "Because public clouds cannot scale resources up or down",
+      "Because the organization has full control over the resources"
+    ],
+    "answer_index": 0,
+    "explanation": "The lower security comes from storing data together with other organizations' data. Pay-as-you-go is a cost feature, public clouds scale easily, and full control is a property of a private cloud.",
+    "level": "understand",
+    "source_quote": "Lower security than a private cloud: Because data is stored alongside other organizations' data."
+  },
+  {
+    "question": "A hospital wants to run its patient-records system on IaaS. It needs stable performance and resources that are not shared with other customers, but wants to avoid the high initial investment of buying physical servers. Which server type fits best?",
+    "options": [
+      "A dedicated virtual server",
+      "A shared virtual server",
+      "A physical server",
+      "A multi-tenant SaaS application"
+    ],
+    "answer_index": 0,
+    "explanation": "Dedicated virtual servers provide separate, non-shared resources and are suited to high-security applications such as medical systems. Shared virtual servers split resources among users, physical servers carry high initial investment costs, and multi-tenant SaaS shares the database.",
+    "level": "apply",
+    "source_quote": "Applications requiring high security: Financial and medical applications."
+  }
 ]

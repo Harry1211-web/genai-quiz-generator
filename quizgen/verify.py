@@ -5,19 +5,26 @@ From cheapest to most expensive:
 2. answer_leak     : the correct option is unusually long compared with the distractors (easy to guess)
 3. answer_mismatch : a verifier model, reading only the source excerpt, picks a different option
 4. unanswerable    : the verifier model says the excerpt is not enough to answer
+5. verify_error    : the verifier call failed (timeout, server down...) - retried on the next run
 (duplicate is added by dedupe.py)
 """
 from __future__ import annotations
 
 import json
 import re
+import time
 import unicodedata
+from collections.abc import Callable
 from difflib import SequenceMatcher
+
+import httpx
 
 from .extract import Section
 from .generate import GeneratedQuestion, load_prompt
-from .llm import LLM, generate_json
+from .llm import LLM, BudgetExceeded, LLMRequestError, generate_json
 from .schema import VerifyAnswer
+
+MAX_CONSECUTIVE_ERRORS = 3  # stop verifying when the verifier keeps failing (e.g. Ollama is down)
 
 
 def _norm(s: str) -> str:
@@ -65,6 +72,7 @@ def check_static(q: GeneratedQuestion, section: Section) -> list[str]:
 
 
 def check_answer_back(llm: LLM, q: GeneratedQuestion, section: Section) -> list[str]:
+    """Ask the verifier to answer from the excerpt only. Stores its answer and reason on q."""
     ctx = find_context(q.mcq.source_quote, section.text)
     payload = {"question": q.mcq.question, "options": q.mcq.options}
     prompt = load_prompt("verify.md").format(source=ctx,
@@ -72,6 +80,7 @@ def check_answer_back(llm: LLM, q: GeneratedQuestion, section: Section) -> list[
     res = generate_json(llm, [{"role": "user", "content": prompt}], VerifyAnswer, temperature=0.0)
     if res is None:
         return ["verify_format_error"]
+    q.verifier_answer, q.verifier_reason = res.answer_index, res.reason
     if res.answer_index == -1:
         return ["unanswerable"]
     if res.answer_index != q.mcq.answer_index:
@@ -79,16 +88,49 @@ def check_answer_back(llm: LLM, q: GeneratedQuestion, section: Section) -> list[
     return []
 
 
+def verify_one(q: GeneratedQuestion, section: Section, verifier: LLM | None) -> None:
+    """Run all checks on one question. A failed verifier call is recorded as 'verify_error'
+    instead of crashing the whole run, so earlier (paid) work is never lost."""
+    q.rejected = check_static(q, section)
+    q.verifier_answer, q.verifier_reason = None, ""
+    if verifier is None or "quote_not_found" in q.rejected:
+        return
+    try:
+        q.rejected += check_answer_back(verifier, q, section)
+    except BudgetExceeded:
+        raise
+    except (httpx.HTTPError, LLMRequestError) as e:
+        q.rejected.append("verify_error")
+        q.verifier_reason = f"{type(e).__name__}: {e}"[:300]
+
+
 def verify_all(questions: list[GeneratedQuestion], sections: dict[str, Section],
-               verifier: LLM | None = None) -> list[GeneratedQuestion]:
+               verifier: LLM | None = None, log: Callable[[str], None] = lambda msg: None,
+               on_done: Callable[[GeneratedQuestion], None] | None = None,
+               skip: set[str] | None = None) -> list[GeneratedQuestion]:
     """The verifier should be a DIFFERENT model from the generator (or at least run at
     temperature 0) so a model does not grade its own work. Steps 3-4 are skipped when
-    verifier=None (cheaper)."""
-    for q in questions:
-        sec = sections[q.section_title]
-        q.rejected += check_static(q, sec)
-        if verifier is not None and "quote_not_found" not in q.rejected:
-            q.rejected += check_answer_back(verifier, q, sec)
+    verifier=None (cheaper).
+
+    on_done: called after each question (used to save progress immediately).
+    skip: qids already verified in a previous run (their stored result is kept)."""
+    skip = skip or set()
+    errors_in_a_row = 0
+    for i, q in enumerate(questions, 1):
+        if q.qid and q.qid in skip:
+            continue
+        ts = time.perf_counter()
+        verify_one(q, sections[q.section_title], verifier)
+        who = verifier.name if verifier is not None and "quote_not_found" not in q.rejected else "static"
+        log(f"[verify {i}/{len(questions)}] {who}: {time.perf_counter() - ts:.1f}s -> "
+            f"{', '.join(q.rejected) or 'ok'}")
+        if on_done is not None:
+            on_done(q)
+        errors_in_a_row = errors_in_a_row + 1 if "verify_error" in q.rejected else 0
+        if errors_in_a_row >= MAX_CONSECUTIVE_ERRORS:
+            log(f"[verify] stopped: {MAX_CONSECUTIVE_ERRORS} verifier errors in a row "
+                f"({q.verifier_reason}). Fix the verifier and run the same command again to resume.")
+            break
     return questions
 
 

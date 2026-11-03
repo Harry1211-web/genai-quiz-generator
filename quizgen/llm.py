@@ -63,6 +63,8 @@ class OpenAICompatLLM:
     budget_usd: float = 2.0
     timeout: float = 120.0
     json_mode: bool = True  # False if the endpoint rejects response_format (HTTP 400)
+    send_temperature: bool = True  # reasoning models often accept only the default temperature
+    reasoning_effort: str | None = None  # e.g. "low" / "medium" / "high" for models that support it
     usage: Usage = field(default_factory=Usage)
 
     @property
@@ -72,26 +74,54 @@ class OpenAICompatLLM:
     def cost_usd(self) -> float:
         return self.usage.cost_usd(self.price_in, self.price_out)
 
+    def _body(self, messages: list[dict], temperature: float, json_mode: bool) -> dict:
+        body: dict = {"model": self.model, "messages": messages}
+        if self.send_temperature:
+            body["temperature"] = temperature
+        if json_mode and self.json_mode:
+            body["response_format"] = {"type": "json_object"}
+        if self.reasoning_effort:
+            body["reasoning_effort"] = self.reasoning_effort
+        return body
+
+    def _post(self, body: dict) -> httpx.Response:
+        """POST with retries for network errors, 429 and 5xx (exponential backoff).
+        4xx errors other than 429 are returned immediately: retrying them never helps."""
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        url = f"{self.base_url.rstrip('/')}/chat/completions"
+        for attempt in range(4):
+            try:
+                r = httpx.post(url, json=body, headers=headers, timeout=self.timeout)
+            except httpx.TransportError:
+                if attempt == 3:
+                    raise
+            else:
+                if r.status_code not in (429, 500, 502, 503, 504) or attempt == 3:
+                    return r
+            time.sleep(2**attempt)
+        raise RuntimeError("unreachable")
+
     def chat(self, messages: list[dict], temperature: float = 0.2, json_mode: bool = True) -> str:
         if self.cost_usd() >= self.budget_usd:
             raise BudgetExceeded(f"Spent ${self.cost_usd():.3f} >= budget ${self.budget_usd}")
-        body: dict = {"model": self.model, "messages": messages, "temperature": temperature}
-        if json_mode and self.json_mode:
-            body["response_format"] = {"type": "json_object"}
-        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         t0 = time.perf_counter()
-        for attempt in range(4):  # retry network errors / 429 / 5xx with exponential backoff
-            try:
-                r = httpx.post(f"{self.base_url.rstrip('/')}/chat/completions", json=body,
-                               headers=headers, timeout=self.timeout)
-                if r.status_code in (429, 500, 502, 503, 504):
-                    raise httpx.HTTPStatusError("retryable", request=r.request, response=r)
-                r.raise_for_status()
+        for _ in range(3):  # up to 2 automatic fixes of unsupported parameters
+            r = self._post(self._body(messages, temperature, json_mode))
+            if r.status_code < 400:
                 break
-            except (httpx.TransportError, httpx.HTTPStatusError):
-                if attempt == 3:
-                    raise
-                time.sleep(2**attempt)
+            msg = _error_message(r)
+            low = msg.lower()
+            if r.status_code == 400 and self.send_temperature and "temperature" in low:
+                _warn(f"{self.model} rejected 'temperature' -> retrying without it ({msg})")
+                self.send_temperature = False
+                continue
+            if r.status_code == 400 and self.json_mode and json_mode and "response_format" in low:
+                _warn(f"{self.model} rejected 'response_format' -> retrying without JSON mode ({msg})")
+                self.json_mode = False
+                continue
+            raise LLMRequestError(f"{self.model} at {self.base_url}: HTTP {r.status_code} - {msg}")
+        else:
+            raise LLMRequestError(f"{self.model}: request still rejected after parameter fixes - {msg}")
         data = r.json()
         self.usage.calls += 1
         self.usage.seconds += time.perf_counter() - t0
@@ -99,6 +129,28 @@ class OpenAICompatLLM:
         self.usage.prompt_tokens += u.get("prompt_tokens", 0)
         self.usage.completion_tokens += u.get("completion_tokens", 0)
         return data["choices"][0]["message"]["content"]
+
+
+class LLMRequestError(RuntimeError):
+    """The provider rejected the request; the message includes the provider's explanation."""
+
+
+def _error_message(r: httpx.Response) -> str:
+    try:
+        err = r.json().get("error")
+        if isinstance(err, dict):
+            return str(err.get("message") or err)
+        if err:
+            return str(err)
+    except ValueError:
+        pass
+    return r.text[:500]
+
+
+def _warn(msg: str) -> None:
+    import sys
+
+    print(f"[llm] {msg}", file=sys.stderr)
 
 
 def from_env(prefix: str = "LLM") -> LLM:
@@ -120,6 +172,8 @@ def from_env(prefix: str = "LLM") -> LLM:
         price_out=float(os.getenv(f"{prefix}_PRICE_OUT", "0")),
         budget_usd=float(os.getenv("LLM_BUDGET_USD", "2")),
         json_mode=os.getenv(f"{prefix}_JSON_MODE", "true").lower() == "true",
+        reasoning_effort=os.getenv(f"{prefix}_REASONING_EFFORT") or None,
+        timeout=float(os.getenv(f"{prefix}_TIMEOUT", "120")),
     )
 
 

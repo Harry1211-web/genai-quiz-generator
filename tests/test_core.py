@@ -122,3 +122,39 @@ def test_slide_deck_boilerplate_removed():
     text = "\n".join(s.text + s.title for s in secs)
     assert "TRUNG TÂM DỮ LIỆU" not in text and "Hạ tầng" not in text
     assert "Topic 1" in text and len(secs) < 10   # short slides are merged
+
+
+def _fake_post(responses):
+    """Replace httpx.post with a function returning the given responses in order."""
+    import httpx
+    calls = []
+
+    def post(url, json=None, headers=None, timeout=None):
+        calls.append(json)
+        status, payload = responses[len(calls) - 1]
+        return httpx.Response(status, json=payload, request=httpx.Request("POST", url))
+    return post, calls
+
+
+def test_unsupported_temperature_is_dropped(monkeypatch):
+    import httpx
+
+    from quizgen.llm import OpenAICompatLLM
+    ok = {"choices": [{"message": {"content": "{}"}}], "usage": {"prompt_tokens": 5, "completion_tokens": 1}}
+    bad = {"error": {"message": "Unsupported value: 'temperature' does not support 0.2 with this model."}}
+    post, calls = _fake_post([(400, bad), (200, ok)])
+    monkeypatch.setattr(httpx, "post", post)
+    llm = OpenAICompatLLM(model="m", api_key="k")
+    assert llm.chat([{"role": "user", "content": "json"}]) == "{}"
+    assert "temperature" in calls[0] and "temperature" not in calls[1] and not llm.send_temperature
+
+
+def test_other_400_shows_provider_message(monkeypatch):
+    import httpx
+
+    from quizgen.llm import LLMRequestError, OpenAICompatLLM
+    post, calls = _fake_post([(400, {"error": {"message": "The model 'x' does not exist"}})])
+    monkeypatch.setattr(httpx, "post", post)
+    with pytest.raises(LLMRequestError, match="does not exist"):
+        OpenAICompatLLM(model="x", api_key="k").chat([{"role": "user", "content": "hi"}])
+    assert len(calls) == 1   # 4xx is not retried

@@ -41,17 +41,29 @@ class GeneratedQuestion:
     page_start: int
     page_end: int
     rejected: list[str] = field(default_factory=list)  # reasons the verification step rejected it
+    qid: str = ""  # stable id "<section index>-<question index>", used to resume interrupted runs
+    verifier_answer: int | None = None  # option chosen by the verifier (-1 = cannot answer)
+    verifier_reason: str = ""  # the verifier's one-sentence reason (or the error message)
 
     @property
     def ok(self) -> bool:
         return not self.rejected
 
     def to_dict(self) -> dict:
-        d = self.mcq.model_dump()
+        d = {"qid": self.qid, **self.mcq.model_dump()}
         d.update(section=self.section_title, strategy=self.strategy, model=self.model,
                  page_start=self.page_start, page_end=self.page_end,
-                 rejected=";".join(self.rejected))
+                 rejected=";".join(self.rejected),
+                 verifier_answer=self.verifier_answer, verifier_reason=self.verifier_reason)
         return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> GeneratedQuestion:
+        """Rebuild a question saved with to_dict() (used when resuming from a checkpoint)."""
+        mcq = MCQ(**{k: d[k] for k in MCQ.model_fields if k in d})
+        rejected = [r for r in (d.get("rejected") or "").split(";") if r]
+        return cls(mcq, d["section"], d["strategy"], d["model"], d["page_start"], d["page_end"],
+                   rejected, d.get("qid", ""), d.get("verifier_answer"), d.get("verifier_reason", ""))
 
 
 def generate_for_section(llm: LLM, section: Section, n: int = 3, strategy: str = "v3",
