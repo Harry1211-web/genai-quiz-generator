@@ -44,6 +44,7 @@ class GeneratedQuestion:
     qid: str = ""  # stable id "<section index>-<question index>", used to resume interrupted runs
     verifier_answer: int | None = None  # option chosen by the verifier (-1 = cannot answer)
     verifier_reason: str = ""  # the verifier's one-sentence reason (or the error message)
+    warnings: list[str] = field(default_factory=list)  # e.g. answer_leak: flagged, NOT rejected
 
     @property
     def ok(self) -> bool:
@@ -53,7 +54,7 @@ class GeneratedQuestion:
         d = {"qid": self.qid, **self.mcq.model_dump()}
         d.update(section=self.section_title, strategy=self.strategy, model=self.model,
                  page_start=self.page_start, page_end=self.page_end,
-                 rejected=";".join(self.rejected),
+                 rejected=";".join(self.rejected), warnings=";".join(self.warnings),
                  verifier_answer=self.verifier_answer, verifier_reason=self.verifier_reason)
         return d
 
@@ -61,9 +62,22 @@ class GeneratedQuestion:
     def from_dict(cls, d: dict) -> GeneratedQuestion:
         """Rebuild a question saved with to_dict() (used when resuming from a checkpoint)."""
         mcq = MCQ(**{k: d[k] for k in MCQ.model_fields if k in d})
-        rejected = [r for r in (d.get("rejected") or "").split(";") if r]
+        rejected, warnings = split_labels(d.get("rejected"), d.get("warnings"))
         return cls(mcq, d["section"], d["strategy"], d["model"], d["page_start"], d["page_end"],
-                   rejected, d.get("qid", ""), d.get("verifier_answer"), d.get("verifier_reason", ""))
+                   rejected, d.get("qid", ""), d.get("verifier_answer"), d.get("verifier_reason", ""),
+                   warnings)
+
+
+WARNING_LABELS = {"answer_leak"}  # labels that used to reject a question and now only warn
+
+
+def split_labels(rejected: str | None, warnings: str | None = None) -> tuple[list[str], list[str]]:
+    """Parse saved ';'-joined labels. Results saved by older versions listed answer_leak as a
+    rejection; it is moved to the warnings so those questions are no longer rejected."""
+    rej = [r for r in (rejected or "").split(";") if r]
+    warn = [w for w in (warnings or "").split(";") if w]
+    warn += [r for r in rej if r in WARNING_LABELS and r not in warn]
+    return [r for r in rej if r not in WARNING_LABELS], warn
 
 
 def generate_for_section(llm: LLM, section: Section, n: int = 3, strategy: str = "v3",

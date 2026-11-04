@@ -53,7 +53,8 @@ if "qs" in st.session_state:
     for i, d in enumerate(st.session_state["qs"]):
         if d["rejected"] and not show_rejected:
             continue
-        warn = f"  ⚠ {d['rejected']}" if d["rejected"] else ""
+        warn = f"  ✖ {d['rejected']}" if d["rejected"] else ""
+        warn += f"  ⚠ {d['warnings']}" if d.get("warnings") else ""
         label = f"{i + 1}. [{d['level']}] {d['question'][:90]}{warn}"
         with st.expander(label):
             q = st.text_area("Question", d["question"], key=f"q{i}")

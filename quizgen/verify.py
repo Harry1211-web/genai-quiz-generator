@@ -1,12 +1,16 @@
 """Step 6 - Automatic verification before questions reach the user.
 
-From cheapest to most expensive:
-1. quote_not_found : source_quote is not in the document (the model invented its evidence)
-2. answer_leak     : the correct option is unusually long compared with the distractors (easy to guess)
-3. answer_mismatch : a verifier model, reading only the source excerpt, picks a different option
-4. unanswerable    : the verifier model says the excerpt is not enough to answer
-5. verify_error    : the verifier call failed (timeout, server down...) - retried on the next run
-(duplicate is added by dedupe.py)
+Rejections, from cheapest to most expensive:
+1. quote_not_found : a sentence of source_quote is not in the document (the model invented its evidence).
+                     Multi-sentence quotes are checked sentence by sentence, so a quote that combines two
+                     bullets from different places in the slides is accepted when every sentence exists.
+2. answer_mismatch : a verifier model, reading only the source excerpt, picks a different option
+3. unanswerable    : the verifier says no option (or more than one) is supported by the excerpt
+4. verify_error    : the verifier call failed (timeout, server down...) - retried on the next run
+(duplicate is added by dedupe.py, not_verified by pipeline.py)
+
+Warnings (shown to the reviewer, the question is NOT rejected):
+- answer_leak      : the correct option is much longer than every distractor (may be easy to guess)
 """
 from __future__ import annotations
 
@@ -33,9 +37,15 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def quote_in_source(quote: str, source: str, threshold: float = 0.85) -> bool:
-    """Fuzzy match: models often change punctuation or whitespace slightly when quoting."""
-    q, s = _norm(quote), _norm(source)
+QUOTE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n+|\s*[✓•●▪➢❖■◆]\s*")
+
+
+def quote_segments(quote: str, min_words: int = 3) -> list[str]:
+    """Split a quote into sentences / bullet items; fragments shorter than min_words are ignored."""
+    return [p.strip() for p in QUOTE_SPLIT_RE.split(quote) if len(p.split()) >= min_words]
+
+
+def _match(q: str, s: str, threshold: float) -> bool:
     if not q:
         return False
     if q in s:
@@ -51,24 +61,57 @@ def quote_in_source(quote: str, source: str, threshold: float = 0.85) -> bool:
     return False
 
 
+def quote_in_source(quote: str, source: str, threshold: float = 0.85) -> bool:
+    """Fuzzy match: models often change punctuation or whitespace slightly when quoting.
+    A quote made of several sentences passes if EVERY sentence is found (they may come from
+    different places in the document); a single invented sentence makes it fail."""
+    s = _norm(source)
+    if _match(_norm(quote), s, threshold):
+        return True
+    segments = quote_segments(quote)
+    if len(segments) < 2:
+        return False
+    return all(_match(_norm(seg), s, threshold) for seg in segments)
+
+
+def _locate(segment: str, source: str) -> int:
+    """Position of a segment in the ORIGINAL text, tolerant to line breaks and punctuation."""
+    words = re.findall(r"\w+", unicodedata.normalize("NFC", segment))[:6]
+    if not words:
+        return -1
+    m = re.search(r"\W+".join(map(re.escape, words)), source, re.IGNORECASE)
+    return m.start() if m else -1
+
+
 def find_context(quote: str, source: str, window: int = 600) -> str:
-    """Return the text around the quote for the verifier (not the whole section)."""
-    idx = _norm(source).find(_norm(quote)[:40])
-    if idx == -1:
+    """Return the text around the quote for the verifier/judge (not the whole section).
+    For a multi-sentence quote, the windows around every sentence are included."""
+    starts = sorted({p for p in (_locate(seg, source) for seg in (quote_segments(quote) or [quote]))
+                     if p >= 0})
+    if not starts:
         return source[: window * 2]
-    # the position in the normalized string approximates the original position - good enough
-    return source[max(0, idx - window) : idx + window]
+    spans: list[list[int]] = []
+    for p in starts:
+        lo, hi = max(0, p - window), min(len(source), p + window)
+        if spans and lo <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], hi)
+        else:
+            spans.append([lo, hi])
+    return "\n...\n".join(source[lo:hi] for lo, hi in spans)
 
 
 def check_static(q: GeneratedQuestion, section: Section) -> list[str]:
-    reasons = []
-    if not quote_in_source(q.mcq.source_quote, section.text):
-        reasons.append("quote_not_found")
+    """Free checks that REJECT a question."""
+    return [] if quote_in_source(q.mcq.source_quote, section.text) else ["quote_not_found"]
+
+
+def check_warnings(q: GeneratedQuestion) -> list[str]:
+    """Free checks that only WARN: the reviewer decides."""
     lens = [len(o) for o in q.mcq.options]
     others = [x for i, x in enumerate(lens) if i != q.mcq.answer_index]
     if lens[q.mcq.answer_index] > 2.0 * max(others) and lens[q.mcq.answer_index] > 40:
-        reasons.append("answer_leak")
-    return reasons
+        return ["answer_leak"]
+    return []
 
 
 def check_answer_back(llm: LLM, q: GeneratedQuestion, section: Section) -> list[str]:
@@ -92,6 +135,7 @@ def verify_one(q: GeneratedQuestion, section: Section, verifier: LLM | None) -> 
     """Run all checks on one question. A failed verifier call is recorded as 'verify_error'
     instead of crashing the whole run, so earlier (paid) work is never lost."""
     q.rejected = check_static(q, section)
+    q.warnings = check_warnings(q)
     q.verifier_answer, q.verifier_reason = None, ""
     if verifier is None or "quote_not_found" in q.rejected:
         return
@@ -139,4 +183,6 @@ def rejection_report(questions: list[GeneratedQuestion]) -> dict[str, int]:
     for q in questions:
         for r in q.rejected:
             rep[r] = rep.get(r, 0) + 1
+        for w in q.warnings:
+            rep[f"warning_{w}"] = rep.get(f"warning_{w}", 0) + 1
     return rep

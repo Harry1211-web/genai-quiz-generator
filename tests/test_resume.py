@@ -82,10 +82,10 @@ def test_verified_questions_are_not_verified_twice(tmp_path):
 
 
 def test_mixing_runs_in_one_folder_is_refused(tmp_path):
-    _check_meta(tmp_path, {"file": "a.pdf", "strategy": "v1"}, fresh=False)
+    _check_meta(tmp_path, {"file": "a.pdf", "strategy": "v1"}, regenerate=False)
     with pytest.raises(SystemExit, match="different run"):
-        _check_meta(tmp_path, {"file": "a.pdf", "strategy": "v2"}, fresh=False)
-    _check_meta(tmp_path, {"file": "a.pdf", "strategy": "v2"}, fresh=True)  # --fresh allows it
+        _check_meta(tmp_path, {"file": "a.pdf", "strategy": "v2"}, regenerate=False)
+    _check_meta(tmp_path, {"file": "a.pdf", "strategy": "v2"}, regenerate=True)  # --regenerate allows it
 
 
 def test_legacy_checkpoint_is_imported(tmp_path):
@@ -102,3 +102,15 @@ def test_legacy_checkpoint_is_imported(tmp_path):
     gen2 = FakeLLM()
     qs2, _ = run(secs, gen2, None, n_per_section=2, strategy="v1", use_st=False, out_dir=legacy)
     assert gen2.usage.calls == 0 and len(qs2) == len(qs)
+
+
+def test_regenerate_archives_old_questions_and_generates_new_ones(tmp_path):
+    from quizgen.pipeline import archive_previous
+    secs = load_sections(SAMPLE)
+    run(secs, FakeLLM(), None, n_per_section=2, strategy="v1", use_st=False, out_dir=tmp_path)
+    old = (tmp_path / GENERATED).read_text(encoding="utf-8")
+    dest = archive_previous(tmp_path)
+    assert dest is not None and (dest / GENERATED).read_text(encoding="utf-8") == old  # nothing deleted
+    gen2 = FakeLLM()
+    run(secs, gen2, None, n_per_section=2, strategy="v1", use_st=False, out_dir=tmp_path)
+    assert gen2.usage.calls == len(secs)   # a new set was generated

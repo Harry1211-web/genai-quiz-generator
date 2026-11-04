@@ -5,12 +5,16 @@ Crash-safe CLI runs: with an output folder, every paid step is saved the moment 
   verified.jsonl  - appended after EACH question is verified (with the verifier's answer and reason)
   run_meta.json   - the settings of the run (file, strategy, n, model)
 Running the same command again RESUMES: sections already generated and questions already verified
-are skipped, so no tokens are spent twice. Use --fresh to start over.
+are skipped, so no tokens are spent twice. Use --regenerate to get a NEW set of questions: the previous
+results are moved to <out>/archive/<timestamp>/ (never deleted). Use --reverify to verify the SAME
+questions again (e.g. after changing the verifier or its prompt) without paying for generation again.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import shutil
 import sys
 import time
 from collections.abc import Callable
@@ -19,7 +23,7 @@ from pathlib import Path
 from .dedupe import mark_duplicates
 from .export import to_csv, to_gift, to_json
 from .extract import Section, load_sections
-from .generate import STRATEGIES, GeneratedQuestion, generate_for_section
+from .generate import STRATEGIES, GeneratedQuestion, generate_for_section, load_prompt, split_labels
 from .llm import LLM, from_env
 from .verify import rejection_report, verify_all
 
@@ -57,20 +61,44 @@ def _read_jsonl(path: Path) -> list[dict]:
     return rows
 
 
-def _check_meta(out_dir: Path, meta: dict, fresh: bool) -> None:
-    """Refuse to mix results of different settings in one folder."""
+OUTPUT_FILES = ("all_questions.jsonl", "quiz.json", "quiz.csv", "quiz.gift.txt", "stats.json")
+RESULT_FILES = (GENERATED, VERIFIED, META, LEGACY_CHECKPOINT, *OUTPUT_FILES)
+
+
+def verify_prompt_version() -> str:
+    """Short hash of the verifier prompt, saved with every verification for traceability."""
+    return hashlib.sha1(load_prompt("verify.md").encode()).hexdigest()[:8]
+
+
+def archive_previous(out_dir: Path, names: tuple[str, ...] = RESULT_FILES) -> Path | None:
+    """Move earlier results into <out_dir>/archive/<timestamp>/ so a new run starts clean
+    without destroying anything that was paid for."""
+    present = [out_dir / n for n in names if (out_dir / n).exists()]
+    if not present:
+        return None
+    dest = out_dir / "archive" / time.strftime("%Y%m%d-%H%M%S")
+    dest.mkdir(parents=True, exist_ok=True)
+    for p in present:
+        shutil.move(str(p), dest / p.name)
+    return dest
+
+
+def _check_meta(out_dir: Path, meta: dict, regenerate: bool) -> Path | None:
+    """Refuse to mix results of different settings in one folder.
+    With regenerate=True the previous results are archived and a new run starts."""
     out_dir.mkdir(parents=True, exist_ok=True)
     meta_path = out_dir / META
-    if fresh:
-        for name in (GENERATED, VERIFIED):
-            (out_dir / name).unlink(missing_ok=True)
+    archived = None
+    if regenerate:
+        archived = archive_previous(out_dir)
     elif meta_path.exists():
         old = json.loads(meta_path.read_text(encoding="utf-8"))
         diff = {k: (old.get(k), v) for k, v in meta.items() if old.get(k) != v}
         if diff:
-            raise SystemExit(f"{out_dir} holds results of a different run {diff}. "
-                             "Use another --out folder, or --fresh to discard the old results.")
+            raise SystemExit(f"{out_dir} holds results of a different run {diff}. Use another --out "
+                             "folder, or --regenerate to archive the old results and start a new run.")
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return archived
 
 
 def _import_legacy(legacy: Path, gen_path: Path, sections: list[Section], log: Callable[[str], None]) -> None:
@@ -138,17 +166,20 @@ def run(sections: list[Section], llm: LLM, verifier: LLM | None = None, n_per_se
     for q in qs:
         if q.qid in previous:
             r = previous[q.qid]
-            q.rejected = [x for x in (r.get("rejected") or "").split(";") if x]
+            q.rejected, q.warnings = split_labels(r.get("rejected"), r.get("warnings"))
             q.verifier_answer, q.verifier_reason = r.get("verifier_answer"), r.get("verifier_reason", "")
     if previous:
         log(f"[resume] {len(previous)} questions already verified - skipping them")
     verified_now: set[str] = set()
+    prompt_version = verify_prompt_version()
 
     def on_done(q: GeneratedQuestion) -> None:
         verified_now.add(q.qid)
         if ver_path:
             _append(ver_path, {"qid": q.qid, "rejected": ";".join(q.rejected),
+                               "warnings": ";".join(q.warnings),
                                "verifier": verifier.name if verifier else None,
+                               "verify_prompt": prompt_version,
                                "verifier_answer": q.verifier_answer, "verifier_reason": q.verifier_reason})
 
     by_title = {s.title: s for s in sections}
@@ -163,7 +194,7 @@ def run(sections: list[Section], llm: LLM, verifier: LLM | None = None, n_per_se
                  seconds=round(time.perf_counter() - t0, 2), llm_calls=llm.usage.calls,
                  prompt_tokens=llm.usage.prompt_tokens, completion_tokens=llm.usage.completion_tokens,
                  format_errors=llm.usage.format_errors, format_failures=llm.usage.format_failures,
-                 verifier=verifier.name if verifier else None,
+                 verifier=verifier.name if verifier else None, verify_prompt=prompt_version,
                  verify_seconds=round(verifier.usage.seconds, 1) if verifier else 0,
                  cost_usd_this_run=round(llm.cost_usd() + (verifier.cost_usd() if verifier else 0), 4))
     return qs, stats
@@ -177,15 +208,26 @@ def main() -> None:
     ap.add_argument("--max-sections", type=int)
     ap.add_argument("--no-verify", action="store_true", help="skip the answer-back verification (cheaper)")
     ap.add_argument("--out", default="reports/output")
-    ap.add_argument("--fresh", action="store_true", help="discard saved progress in --out and start over")
+    ap.add_argument("--regenerate", "--fresh", dest="regenerate", action="store_true",
+                    help="generate a NEW set of questions; previous results are moved to <out>/archive/")
+    ap.add_argument("--reverify", action="store_true",
+                    help="keep the generated questions but verify them again "
+                         "(previous verification is archived)")
     ap.add_argument("--quiet", action="store_true", help="do not print progress")
     a = ap.parse_args()
 
     llm = from_env("LLM")
     verifier = None if a.no_verify else from_env("VERIFY")
     out = Path(a.out)
-    _check_meta(out, {"file": Path(a.file).name, "strategy": a.strategy, "n": a.n,
-                      "max_sections": a.max_sections, "model": llm.name}, a.fresh)
+    archived = _check_meta(out, {"file": Path(a.file).name, "strategy": a.strategy, "n": a.n,
+                                 "max_sections": a.max_sections, "model": llm.name}, a.regenerate)
+    if archived:
+        print(f"[regenerate] previous results moved to {archived}", file=sys.stderr)
+    if a.reverify and not a.regenerate:
+        moved = archive_previous(out, (VERIFIED, *OUTPUT_FILES))
+        if moved:
+            print(f"[reverify] previous verification moved to {moved}; generated questions are reused",
+                  file=sys.stderr)
     sections = load_sections(a.file)
     print(f"{len(sections)} sections: " + ", ".join(s.title for s in sections[:8]), file=sys.stderr)
     qs, stats = run(sections, llm, verifier, a.n, a.strategy, a.max_sections,

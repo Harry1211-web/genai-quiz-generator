@@ -1,12 +1,16 @@
 .venv/
 __pycache__/
 .env
-reports/output/
-reports/eval/
 *.pyc
 .pytest_cache/
 .ruff_cache/
 eval/configs.json
 data/private/
 _to_delete/
-reports/sections/
+# Run outputs contain questions and verbatim quotes from (copyrighted) lecture slides: never commit them.
+# Whitelist only aggregate results you want to publish.
+reports/*
+!reports/.gitkeep
+!reports/demo.gif
+!reports/summary.md
+!reports/quality_report.md

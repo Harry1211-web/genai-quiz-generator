@@ -71,11 +71,17 @@ no configuration verifies its own output.
 ## Running the experiment
 
 ```bash
-cp eval/configs.example.json eval/configs.json         # declare the 2 models
+cp eval/configs.example.json eval/configs.json         # 2 generators, each with the other model as verifier
+python -m eval.run_eval data/private/eval_set --n 3 --max-sections 1   # cheap trial run first
 python -m eval.run_eval data/private/eval_set --n 3
 # rate reports/eval/labeling_sheet.csv by hand following eval/rubric.md (blind: model/strategy hidden)
 python -m eval.report reports/eval
 ```
+
+Both `quizgen.pipeline` and `eval.run_eval` are crash-safe: generation is saved after every section,
+verification and judging after every question. After a crash, a timeout or Ctrl+C, run the same command
+again - finished work is skipped, so nothing is paid for twice. Ratings already typed into
+`labeling_sheet.csv` are kept when the sheet is rebuilt (a backup is written first).
 
 ## Design decisions
 
