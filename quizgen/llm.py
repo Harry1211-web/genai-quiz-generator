@@ -3,6 +3,9 @@
 - OpenAICompatLLM: calls an OpenAI-compatible /chat/completions endpoint. Works with
   OpenAI, Ollama (http://localhost:11434/v1), Groq, OpenRouter, Gemini (OpenAI-compatible
   endpoint), vLLM... - only LLM_BASE_URL, LLM_MODEL and LLM_API_KEY change.
+- OllamaLLM: calls Ollama's native /api/chat, which can turn a model's "thinking" off explicitly
+  (think=false). Thinking models such as Qwen3.5 otherwise write hundreds of hidden tokens before
+  every short answer, which makes local verification take minutes per question.
 - FakeLLM: a fake LLM that returns valid JSON built from the document itself. Used for
   tests/CI and for running the whole pipeline at zero cost.
 
@@ -63,7 +66,9 @@ class OpenAICompatLLM:
     budget_usd: float = 2.0
     timeout: float = 120.0
     json_mode: bool = True  # False if the endpoint rejects response_format (HTTP 400)
-    send_temperature: bool = True  # reasoning models often accept only the default temperature
+    # Off by default: reasoning models such as gpt-6-luna only accept their default temperature.
+    # Turn on (LLM_TEMPERATURE_<n>=true) for API models that support it.
+    send_temperature: bool = False
     reasoning_effort: str | None = None  # e.g. "low" / "medium" / "high" for models that support it
     usage: Usage = field(default_factory=Usage)
 
@@ -85,36 +90,19 @@ class OpenAICompatLLM:
         return body
 
     def _post(self, body: dict) -> httpx.Response:
-        """POST with retries for network errors, 429 and 5xx (exponential backoff).
-        4xx errors other than 429 are returned immediately: retrying them never helps."""
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        url = f"{self.base_url.rstrip('/')}/chat/completions"
-        for attempt in range(4):
-            try:
-                r = httpx.post(url, json=body, headers=headers, timeout=self.timeout)
-            except httpx.TransportError:
-                if attempt == 3:
-                    raise
-            else:
-                if r.status_code not in (429, 500, 502, 503, 504) or attempt == 3:
-                    return r
-            time.sleep(2**attempt)
-        raise RuntimeError("unreachable")
+        return post_with_retries(f"{self.base_url.rstrip('/')}/chat/completions", body, headers, self.timeout)
 
     def chat(self, messages: list[dict], temperature: float = 0.2, json_mode: bool = True) -> str:
         if self.cost_usd() >= self.budget_usd:
             raise BudgetExceeded(f"Spent ${self.cost_usd():.3f} >= budget ${self.budget_usd}")
         t0 = time.perf_counter()
-        for _ in range(3):  # up to 2 automatic fixes of unsupported parameters
+        for _ in range(2):  # one automatic fix of an unsupported parameter
             r = self._post(self._body(messages, temperature, json_mode))
             if r.status_code < 400:
                 break
             msg = _error_message(r)
             low = msg.lower()
-            if r.status_code == 400 and self.send_temperature and "temperature" in low:
-                _warn(f"{self.model} rejected 'temperature' -> retrying without it ({msg})")
-                self.send_temperature = False
-                continue
             if r.status_code == 400 and self.json_mode and json_mode and "response_format" in low:
                 _warn(f"{self.model} rejected 'response_format' -> retrying without JSON mode ({msg})")
                 self.json_mode = False
@@ -129,6 +117,77 @@ class OpenAICompatLLM:
         self.usage.prompt_tokens += u.get("prompt_tokens", 0)
         self.usage.completion_tokens += u.get("completion_tokens", 0)
         return data["choices"][0]["message"]["content"]
+
+
+def post_with_retries(url: str, body: dict, headers: dict, timeout: float) -> httpx.Response:
+    """POST with retries for network errors, 429 and 5xx (exponential backoff).
+    4xx errors other than 429 are returned immediately: retrying them never helps."""
+    for attempt in range(4):
+        try:
+            r = httpx.post(url, json=body, headers=headers, timeout=timeout)
+        except httpx.TransportError:
+            if attempt == 3:
+                raise
+        else:
+            if r.status_code not in (429, 500, 502, 503, 504) or attempt == 3:
+                return r
+        time.sleep(2**attempt)
+    raise RuntimeError("unreachable")
+
+
+@dataclass
+class OllamaLLM:
+    """Local model through Ollama's native API (http://localhost:11434/api/chat).
+
+    think=False turns thinking off (supported by recent Ollama versions for thinking models);
+    think=None sends nothing and keeps the model's default. Local calls cost $0."""
+
+    model: str
+    base_url: str = "http://localhost:11434"
+    think: bool | None = False
+    json_mode: bool = True
+    timeout: float = 300.0
+    usage: Usage = field(default_factory=Usage)
+
+    @property
+    def name(self) -> str:
+        return self.model
+
+    def cost_usd(self) -> float:
+        return 0.0
+
+    def _url(self) -> str:
+        base = self.base_url.rstrip("/")
+        if base.endswith("/v1"):  # accept the OpenAI-style URL too
+            base = base[:-3]
+        return f"{base}/api/chat"
+
+    def chat(self, messages: list[dict], temperature: float = 0.2, json_mode: bool = True) -> str:
+        t0 = time.perf_counter()
+        for _ in range(2):  # one automatic fix: drop "think" for models that do not support it
+            body: dict = {"model": self.model, "messages": messages, "stream": False,
+                          "options": {"temperature": temperature}}
+            if self.think is not None:
+                body["think"] = self.think
+            if json_mode and self.json_mode:
+                body["format"] = "json"
+            r = post_with_retries(self._url(), body, {}, self.timeout)
+            if r.status_code < 400:
+                break
+            msg = _error_message(r)
+            if r.status_code == 400 and self.think is not None and "think" in msg.lower():
+                _warn(f"{self.model} rejected 'think' -> retrying with the model's default ({msg})")
+                self.think = None
+                continue
+            raise LLMRequestError(f"{self.model} at {self._url()}: HTTP {r.status_code} - {msg}")
+        else:
+            raise LLMRequestError(f"{self.model}: request still rejected - {msg}")
+        data = r.json()
+        self.usage.calls += 1
+        self.usage.seconds += time.perf_counter() - t0
+        self.usage.prompt_tokens += data.get("prompt_eval_count", 0)
+        self.usage.completion_tokens += data.get("eval_count", 0)  # includes thinking tokens
+        return data["message"]["content"]
 
 
 class LLMRequestError(RuntimeError):
@@ -153,28 +212,77 @@ def _warn(msg: str) -> None:
     print(f"[llm] {msg}", file=sys.stderr)
 
 
-def from_env(prefix: str = "LLM") -> LLM:
-    """Read config from environment variables with a role prefix: LLM_*, VERIFY_*, JUDGE_*."""
+# Which numbered model plays which role when nothing else is given. Change roles here, with the
+# --generator / --verifier / --judge command-line options, or per configuration in eval/configs.json.
+DEFAULT_ROLES = {"generator": 1, "verifier": 2, "judge": 1}
+
+MODEL_KEYS = ("MODEL", "BASE_URL", "API_KEY", "PRICE_IN", "PRICE_OUT",            # what .env normally holds
+              "PROVIDER", "THINK", "TIMEOUT", "JSON_MODE", "REASONING_EFFORT",   # optional extras
+              "TEMPERATURE")
+
+
+def _load_env() -> None:
     try:
         from dotenv import load_dotenv
 
         load_dotenv()
     except ImportError:
         pass
-    model = os.getenv(f"{prefix}_MODEL", "fake")
+
+
+def model_settings(n: int | str) -> dict[str, str]:
+    """Raw settings of model n from .env: LLM_MODEL_n, LLM_BASE_URL_n, LLM_API_KEY_n, LLM_PRICE_IN_n, ..."""
+    _load_env()
+    return {k: v for k in MODEL_KEYS if (v := os.getenv(f"LLM_{k}_{n}")) not in (None, "")}
+
+
+def build_llm(s: dict, name: str = "fake") -> LLM:
+    """Build a model from settings with the keys of MODEL_KEYS (lower or upper case).
+    A base URL on port 11434 means a local Ollama server, called through its native API with
+    thinking off unless THINK says otherwise."""
+    s = {k.upper(): v for k, v in s.items()}
+    model = s.get("MODEL", "fake")
     if model == "fake":
+        return FakeLLM(name=name)
+    base_url = s.get("BASE_URL", "")
+    provider = str(s.get("PROVIDER") or ("ollama" if ":11434" in base_url else "openai")).lower()
+    json_mode = str(s.get("JSON_MODE", "true")).lower() == "true"
+    if provider == "ollama":
+        return OllamaLLM(model=model, base_url=base_url or "http://localhost:11434",
+                         think=parse_think(s.get("THINK", "false")), json_mode=json_mode,
+                         timeout=float(s.get("TIMEOUT", 300)))
+    return OpenAICompatLLM(model=model, base_url=base_url or "https://api.openai.com/v1",
+                           api_key=s.get("API_KEY", ""), price_in=float(s.get("PRICE_IN", 0)),
+                           price_out=float(s.get("PRICE_OUT", 0)),
+                           budget_usd=float(os.getenv("LLM_BUDGET_USD", "2")), json_mode=json_mode,
+                           reasoning_effort=s.get("REASONING_EFFORT") or None,
+                           send_temperature=str(s.get("TEMPERATURE", "false")).lower() == "true",
+                           timeout=float(s.get("TIMEOUT", 120)))
+
+
+def model_from_env(n: int | str) -> LLM:
+    """Model number n declared in .env ("fake" = the fake LLM used by tests and dry runs).
+    If LLM_MODEL_n is missing, a fake model is used and a warning is printed."""
+    if str(n).lower() == "fake":
         return FakeLLM()
-    return OpenAICompatLLM(
-        model=model,
-        base_url=os.getenv(f"{prefix}_BASE_URL", "https://api.openai.com/v1"),
-        api_key=os.getenv(f"{prefix}_API_KEY", ""),
-        price_in=float(os.getenv(f"{prefix}_PRICE_IN", "0")),
-        price_out=float(os.getenv(f"{prefix}_PRICE_OUT", "0")),
-        budget_usd=float(os.getenv("LLM_BUDGET_USD", "2")),
-        json_mode=os.getenv(f"{prefix}_JSON_MODE", "true").lower() == "true",
-        reasoning_effort=os.getenv(f"{prefix}_REASONING_EFFORT") or None,
-        timeout=float(os.getenv(f"{prefix}_TIMEOUT", "120")),
-    )
+    s = model_settings(n)
+    if "MODEL" not in s:
+        _warn(f"LLM_MODEL_{n} is not set in .env -> using the fake model (no real LLM calls)")
+        return FakeLLM(name=f"fake-{n}")
+    return build_llm(s)
+
+
+def model_for_role(role: str, n: int | str | None = None) -> LLM:
+    """Model for a role (generator / verifier / judge): model n if given, else DEFAULT_ROLES[role]."""
+    return model_from_env(n if n is not None else DEFAULT_ROLES[role])
+
+
+def parse_think(value) -> bool | None:
+    """'false' -> False, 'true' -> True, 'default' / '' -> None (send nothing)."""
+    if value is None or isinstance(value, bool):
+        return value
+    v = str(value).strip().lower()
+    return None if v in ("", "default", "none") else v in ("1", "true", "yes", "on")
 
 
 # ---------------------------------------------------------------- JSON + retry

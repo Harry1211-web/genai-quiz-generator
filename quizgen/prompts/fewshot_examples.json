@@ -21,7 +21,7 @@
       "To compress packets so they are smaller"
     ],
     "answer_index": 0,
-    "explanation": "The handshake (SYN, SYN-ACK, ACK) lets both sides exchange initial sequence numbers and confirm a two-way connection; encryption is TLS's job and routing belongs to the network layer.",
+    "explanation": "The handshake (SYN, SYN-ACK, ACK) lets both sides exchange initial sequence numbers and confirm a two-way connection. Encryption is the job of TLS, choosing a path is routing at the network layer, and TCP does not compress packets.",
     "level": "understand",
     "source_quote": "The three-way handshake lets both sides synchronize their initial sequence numbers."
   },
@@ -34,34 +34,34 @@
       "The server already sent the final ACK"
     ],
     "answer_index": 0,
-    "explanation": "No SYN-ACK means step 2 never happened: the packet was blocked or nothing is listening; application data has not been sent at this stage.",
+    "explanation": "No SYN-ACK means step 2 never happened: the SYN was blocked or nothing is listening on the port. Host A could not have sent the SYN without a MAC address, no application data has been sent at this stage, and the final ACK is sent by the client, not the server, and only after the SYN-ACK.",
     "level": "apply",
     "source_quote": "A listening server replies with a SYN-ACK segment."
   },
   {
-    "question": "Why is a public cloud considered less secure than a private cloud?",
+    "question": "Why does adding an index to a table make SELECT queries faster but INSERT statements slower?",
     "options": [
-      "Because the data is stored alongside other organizations' data",
-      "Because public clouds use a pay-as-you-go pricing model",
-      "Because public clouds cannot scale resources up or down",
-      "Because the organization has full control over the resources"
+      "The database can find rows without scanning the whole table, but every INSERT must also update the index",
+      "The index stores a compressed copy of the table that must be decompressed before every INSERT",
+      "The index locks the whole table while a SELECT is running, so INSERT statements have to wait",
+      "The index is kept only in memory and is rebuilt from scratch after each INSERT"
     ],
     "answer_index": 0,
-    "explanation": "The lower security comes from storing data together with other organizations' data. Pay-as-you-go is a cost feature, public clouds scale easily, and full control is a property of a private cloud.",
+    "explanation": "An index lets the database locate rows directly instead of scanning the table, and keeping it up to date is extra work on every write. An index is not a compressed copy of the table, it does not lock the table for reads, and it is updated incrementally rather than rebuilt after each INSERT.",
     "level": "understand",
-    "source_quote": "Lower security than a private cloud: Because data is stored alongside other organizations' data."
+    "source_quote": "An index lets the database find rows without scanning the whole table, but every INSERT, UPDATE or DELETE must also update the index."
   },
   {
-    "question": "A hospital wants to run its patient-records system on IaaS. It needs stable performance and resources that are not shared with other customers, but wants to avoid the high initial investment of buying physical servers. Which server type fits best?",
+    "question": "A server with 8 GB of RAM runs several processes that together need about 14 GB of memory. The disk is busy all the time, programs respond very slowly, and CPU usage stays below 10%. Which change will help the most?",
     "options": [
-      "A dedicated virtual server",
-      "A shared virtual server",
-      "A physical server",
-      "A multi-tenant SaaS application"
+      "Add more RAM or run fewer processes at the same time",
+      "Replace the CPU with a faster model",
+      "Increase the time slice given to each process by the scheduler",
+      "Make the swap file larger"
     ],
     "answer_index": 0,
-    "explanation": "Dedicated virtual servers provide separate, non-shared resources and are suited to high-security applications such as medical systems. Shared virtual servers split resources among users, physical servers carry high initial investment costs, and multi-tenant SaaS shares the database.",
+    "explanation": "The symptoms describe thrashing: the processes need more pages than physical memory can hold, so the system keeps paging instead of executing; more RAM or fewer processes removes the cause. A faster CPU does not help because the CPU is mostly idle, a longer time slice does not reduce the number of pages needed, and a larger swap file only gives more room to page, not less paging.",
     "level": "apply",
-    "source_quote": "Applications requiring high security: Financial and medical applications."
+    "source_quote": "Thrashing occurs when the processes in memory need more pages than physical memory can hold, so the system spends more time paging than executing."
   }
 ]

@@ -6,6 +6,7 @@ v3 plan -> generate: call 1 extracts key points, call 2 writes one question per 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 from dataclasses import dataclass, field
@@ -30,6 +31,32 @@ def _examples() -> str:
 
 def _schema(model) -> str:
     return json.dumps(model.model_json_schema(), ensure_ascii=False)
+
+
+PROMPT_FILES = {"v1": ["system.md", "v1_zeroshot.md"],
+                "v2": ["system.md", "v2_fewshot.md", "fewshot_examples.json"],
+                "v3": ["system.md", "v3_plan.md", "v3_generate.md", "fewshot_examples.json"]}
+
+
+def gen_prompt_version(strategy: str) -> str:
+    """Short hash of everything the generator is told for a strategy (prompt files, examples and
+    the JSON schemas). Saved with every run, so questions written by an older prompt are never mixed
+    with questions written by a newer one when a run is resumed."""
+    h = hashlib.sha1()
+    for name in PROMPT_FILES[strategy]:
+        h.update(load_prompt(name).encode())
+    h.update(_schema(MCQList).encode())
+    if strategy == "v3":
+        h.update(_schema(KeyPointList).encode())
+    return h.hexdigest()[:8]
+
+
+def sections_version(sections) -> str:
+    """Short hash of the section titles and texts: changes when the extraction changes."""
+    h = hashlib.sha1()
+    for s in sections:
+        h.update(f"{s.title}\n{s.text}\n\x00".encode())
+    return h.hexdigest()[:8]
 
 
 @dataclass

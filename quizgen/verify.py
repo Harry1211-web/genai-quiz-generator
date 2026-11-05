@@ -37,12 +37,15 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-QUOTE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n+|\s*[✓•●▪➢❖■◆]\s*")
+# sentence ends, line breaks, bullet symbols, and quoted items joined as "...", "..." (seen with Qwen)
+QUOTE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n+|\s*[✓•●▪➢❖■◆]\s*|[\"“”]\s*[,;]\s*[\"“”]")
+QUOTE_CHARS = "\"'“”‘’ "
 
 
 def quote_segments(quote: str, min_words: int = 3) -> list[str]:
     """Split a quote into sentences / bullet items; fragments shorter than min_words are ignored."""
-    return [p.strip() for p in QUOTE_SPLIT_RE.split(quote) if len(p.split()) >= min_words]
+    parts = (p.strip().strip(QUOTE_CHARS) for p in QUOTE_SPLIT_RE.split(quote))
+    return [p for p in parts if len(p.split()) >= min_words]
 
 
 def _match(q: str, s: str, threshold: float) -> bool:
@@ -50,14 +53,22 @@ def _match(q: str, s: str, threshold: float) -> bool:
         return False
     if q in s:
         return True
-    # slide a window of the same length over the source, keep the best similarity ratio
+    # 1) coarse scan: slide a window of the same length over the source with a big step
     n = len(q)
     step = max(1, n // 4)
-    best = 0.0
-    for i in range(0, max(1, len(s) - n + 1), step):
-        best = max(best, SequenceMatcher(None, q, s[i : i + n]).ratio())
-        if best >= threshold:
+    last = max(1, len(s) - n + 1)
+    coarse = []
+    for i in range(0, last, step):
+        r = SequenceMatcher(None, q, s[i : i + n]).ratio()
+        if r >= threshold:
             return True
+        coarse.append((r, i))
+    # 2) fine scan around the best coarse positions: the big step can miss the exact alignment
+    #    (e.g. the model fixed a typo of the slide, so the text is shifted by a few characters)
+    for _, i in sorted(coarse, reverse=True)[:3]:
+        for j in range(max(0, i - step), min(last, i + step + 1)):
+            if SequenceMatcher(None, q, s[j : j + n]).ratio() >= threshold:
+                return True
     return False
 
 

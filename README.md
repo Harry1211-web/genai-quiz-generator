@@ -122,7 +122,7 @@ PDF / PPTX -> extract (PyMuPDF / python-pptx, Unicode NFC)
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-cp .env.example .env                                   # LLM_MODEL=fake by default: zero-cost dry run
+cp .env.example .env                                   # without LLM_MODEL_<n>: fake model, zero-cost dry run
 pytest -q
 python -m quizgen.pipeline data/samples/transport_layer_tcp_udp.md --n 2 --strategy v3
 streamlit run app/streamlit_app.py
@@ -130,10 +130,12 @@ uvicorn api.main:app --reload                          # POST /generate
 docker compose up --build                              # API on :8000, UI on :8501
 ```
 
-To use real models, edit `.env` (`LLM_*` generator, `VERIFY_*` verifier, `JUDGE_*` judge). Any OpenAI-compatible
-endpoint works, including a local Ollama server (`http://localhost:11434/v1`). Recommended setup: a hosted API model
-generates and judges, a local model verifies (free), and roles are swapped when the small model is the generator so
-no configuration verifies its own output.
+`.env` declares each model once, by number: `LLM_MODEL_<n>`, `LLM_BASE_URL_<n>`, `LLM_API_KEY_<n>`,
+`LLM_PRICE_IN_<n>`, `LLM_PRICE_OUT_<n>`. Roles are not stored there: by default model 1 generates and judges and
+model 2 verifies (`DEFAULT_ROLES` in `quizgen/llm.py`); switch them with `--generator 2 --verifier 1`, or per
+configuration in `eval/configs.json`. Any OpenAI-compatible endpoint works; a base URL on port 11434 is treated as
+a local Ollama server, called through its native API with thinking off. In the experiment the two models swap roles,
+so no configuration verifies its own output.
 
 ## Running the experiment
 

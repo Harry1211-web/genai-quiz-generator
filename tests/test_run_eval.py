@@ -3,6 +3,7 @@ import json
 import sys
 
 import pandas as pd
+import pytest
 
 from eval import run_eval
 
@@ -93,3 +94,22 @@ def test_regenerate_flag_archives_runs(monkeypatch, tmp_path):
     archived = list((out / "archive").glob("*/runs"))
     assert len(archived) == 1 and any(archived[0].rglob("generated.jsonl"))
     assert any((out / "runs").rglob("generated.jsonl"))
+
+
+def test_cost_table_includes_verifier_cost_and_totals():
+    def cell(cfg, strat, gen_usd, ver_usd, jud_usd):
+        return {"config": cfg, "strategy": strat, "doc": "d", "questions": 10, "accepted": 9,
+                "gen_tokens_in": 1000, "gen_tokens_out": 500, "gen_cost_usd": gen_usd, "gen_seconds": 60,
+                "verify_tokens_in": 300, "verify_tokens_out": 20, "verify_cost_usd": ver_usd,
+                "verify_seconds": 30, "judge_tokens_in": 400, "judge_tokens_out": 40,
+                "judge_cost_usd": jud_usd, "judge_seconds": 12}
+    st = pd.DataFrame([cell("luna", "v1", 0.01, 0.0, 0.002),       # local verifier: $0
+                       cell("qwen-4b", "v1", 0.0, 0.003, 0.002)])  # paid verifier
+    quality, cost, totals = run_eval.build_tables(st, pd.DataFrame({"rejected": []}))
+    total = cost[cost["config"] == "TOTAL"].iloc[0]
+    assert total["verify_usd"] == 0.003                             # verifier cost is reported
+    assert total["total_usd"] == round(0.01 + 0.003 + 0.002 * 2, 4)
+    assert total["total_tokens"] == 2 * (1500 + 320 + 440)
+    assert totals["total_cost_usd"] == pytest.approx(0.017)
+    assert totals["by_config"] == {"luna": pytest.approx(0.012), "qwen-4b": pytest.approx(0.005)}
+    assert list(quality["rejected_rate"]) == [0.1, 0.1]

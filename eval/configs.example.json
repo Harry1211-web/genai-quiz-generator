@@ -1,9 +1,4 @@
 [
-  {"name": "luna", "model": "gpt-6-luna", "base_url": "https://api.openai.com/v1",
-   "api_key_env": "OPENAI_API_KEY", "price_in": 0.10, "price_out": 0.50,
-   "verifier": {"name": "qwen-verifier", "model": "qwen3.5:4b", "base_url": "http://localhost:11434/v1",
-                "timeout": 300}},
-  {"name": "qwen-4b", "model": "qwen3.5:4b", "base_url": "http://localhost:11434/v1", "timeout": 300,
-   "verifier": {"name": "luna-verifier", "model": "gpt-6-luna", "base_url": "https://api.openai.com/v1",
-                "api_key_env": "OPENAI_API_KEY", "price_in": 0.10, "price_out": 0.50}}
+  {"name": "luna", "generator": 1, "verifier": 2},
+  {"name": "qwen-4b", "generator": 2, "verifier": 1}
 ]

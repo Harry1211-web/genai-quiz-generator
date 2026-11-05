@@ -77,3 +77,47 @@ def test_reverify_reuses_generation(tmp_path):
     rows = [json.loads(x) for x in (tmp_path / VERIFIED).read_text(encoding="utf-8").splitlines()]
     assert all(r["verify_prompt"] for r in rows)
     assert (tmp_path / GENERATED).exists()
+
+
+# ---- found by reading the rejected questions of the dev check (Sprint 2)
+LIST_SOURCE = ("Cloud everywhere\n❖ Shops rent servers for weekly sales reports.\n"
+               "❖ Families stream films to televisions at home.\n"
+               "❖ Teachers share lesson plans through online folders.\n")
+
+
+def test_quote_of_items_joined_as_quoted_list_is_accepted():
+    quote = ('"Shops rent servers for weekly sales reports.", '
+             '"Teachers share lesson plans through online folders."')
+    assert quote_in_source(quote, LIST_SOURCE)
+
+
+def test_quoted_list_with_one_invented_item_is_rejected():
+    quote = '"Shops rent servers for weekly sales reports.", "Farmers plant crops with cloud robots daily."'
+    assert not quote_in_source(quote, LIST_SOURCE)
+
+
+def test_quote_where_the_model_fixed_a_typo_of_the_slide_is_accepted():
+    source = ("Intro slide\n" + "Unrelated words about networks and storage. " * 6 +
+              "\n➢A runtime is a managed layer that lets teams build, test and ship code without "
+              "having to care about it. care about the servers, patches and scaling rules that "
+              "a typical deployment needs.\n" + "More unrelated words about billing. " * 6)
+    quote = ("A runtime is a managed layer that lets teams build, test and ship code without having to "
+             "care about the servers, patches and scaling rules that a typical deployment needs.")
+    assert quote_in_source(quote, source)
+
+
+def test_summary_that_merges_bullets_is_still_rejected():
+    source = "Parts of a kit\n➢Lamp: gives light\n➢Battery: stores power\n➢Switch: turns it on\n"
+    assert not quote_in_source("Parts of a kit include Lamp, Battery and Switch.", source)
+
+
+def test_recheck_forgets_only_quote_rejections(tmp_path):
+    from quizgen.pipeline import drop_rejections
+    rows = [{"qid": "0-0", "rejected": "quote_not_found"}, {"qid": "0-1", "rejected": ""},
+            {"qid": "0-2", "rejected": "answer_mismatch"}]
+    (tmp_path / VERIFIED).write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    assert drop_rejections(tmp_path, "quote_not_found") == 1
+    kept = [json.loads(x)["qid"] for x in (tmp_path / VERIFIED).read_text().splitlines()]
+    assert kept == ["0-1", "0-2"]
+    assert (tmp_path / "verified.before-recheck.jsonl").exists()
+    assert drop_rejections(tmp_path, "quote_not_found") == 0

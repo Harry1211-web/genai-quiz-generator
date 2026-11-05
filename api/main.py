@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 
 from quizgen.extract import load_sections
-from quizgen.llm import BudgetExceeded, from_env
+from quizgen.llm import BudgetExceeded, model_for_role
 from quizgen.pipeline import run
 
 app = FastAPI(title="GenAI Quiz Generator")
@@ -31,7 +31,7 @@ async def generate(file: UploadFile = File(...), strategy: str = Query("v3", pat
         f.write(data)
     try:
         sections = load_sections(f.name)
-        qs, stats = run(sections, from_env("LLM"), from_env("VERIFY") if verify else None,
+        qs, stats = run(sections, model_for_role("generator"), model_for_role("verifier") if verify else None,
                         n, strategy, max_sections)
     except BudgetExceeded as e:
         raise HTTPException(429, str(e)) from e

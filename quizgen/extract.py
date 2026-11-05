@@ -53,6 +53,28 @@ def approx_tokens(text: str) -> int:
     return int(len(text) / 3.5) + 1
 
 
+def pdf_page_text(page, gap: float = 0.2) -> str:
+    """Text of a PDF page rebuilt from the position of every character.
+    Some PDFs (seen in a Vietnamese deck) contain NO space character between words, only a visual gap,
+    so get_text("text") returns "vềhạtầng" instead of "về hạ tầng". A space is inserted wherever the gap
+    between two characters is larger than `gap` x font size (normal letter spacing is ~0.02 x size)."""
+    lines = []
+    for block in page.get_text("rawdict")["blocks"]:
+        for line in block.get("lines", []):
+            buf: list[str] = []
+            prev_right = None
+            for span in line["spans"]:
+                for ch in span["chars"]:
+                    c = ch["c"]
+                    if (prev_right is not None and c != " " and buf and buf[-1] != " "
+                            and ch["bbox"][0] - prev_right > gap * span["size"]):
+                        buf.append(" ")
+                    buf.append(c)
+                    prev_right = ch["bbox"][2]
+            lines.append("".join(buf))
+    return "\n".join(lines)
+
+
 def load_pages(path: str | Path) -> list[Page]:
     path = Path(path)
     suffix = path.suffix.lower()
@@ -60,7 +82,7 @@ def load_pages(path: str | Path) -> list[Page]:
         import pymupdf  # PyMuPDF
 
         with pymupdf.open(path) as doc:
-            return [Page(i + 1, normalize(p.get_text("text"))) for i, p in enumerate(doc)]
+            return [Page(i + 1, normalize(pdf_page_text(p))) for i, p in enumerate(doc)]
     if suffix == ".pptx":
         return load_pptx(path)
     # .txt / .md: a form feed ("\f") marks a page break; otherwise the whole file is one page
@@ -129,6 +151,35 @@ def strip_boilerplate(pages: list[Page], min_share: float = 0.3) -> list[Page]:
     return out
 
 
+# Slides that hold no testable content: cover, agenda / table of contents, learning objectives,
+# section dividers. Questions generated from them are about the course outline, not the subject
+# (and an agenda may even contradict the slides, e.g. "Single-tasking" vs "Single-tenant").
+COVER_RE = re.compile(r"\b(welcome to|part|chapter|chương|phần|lecture|bài)\s*\d*\b", re.IGNORECASE)
+TOC_LINE_RE = re.compile(r"^(introduction|agenda|contents|table of contents|outline|nội dung|mục lục)$",
+                         re.IGNORECASE)
+OBJECTIVES_LINE_RE = re.compile(r"^(learning )?(objectives|outcomes|mục tiêu( bài học)?)$", re.IGNORECASE)
+NUMBERED_RE = re.compile(r"^\d{1,2}[.)]\s*\S")
+BULLETS = "❖■◆➢✓•●▪#-* "
+
+
+def front_matter_kind(p: Page) -> str | None:
+    """'cover', 'agenda', 'objectives', 'divider' or None for a slide with real content."""
+    lines = [ln.strip().strip(BULLETS).strip() for ln in p.text.split("\n") if ln.strip().strip(BULLETS)]
+    words = len(p.text.split())
+    if not lines:
+        return None
+    short = words <= 15 and not any(len(ln.split()) > 8 for ln in lines)
+    if short and (p.number <= 2 or COVER_RE.search(p.text)):
+        return "cover"
+    if words <= 80 and any(TOC_LINE_RE.match(ln) for ln in lines):
+        return "agenda"
+    if words <= 120 and any(OBJECTIVES_LINE_RE.match(ln) for ln in lines):
+        return "objectives"
+    if short and any(NUMBERED_RE.match(ln) for ln in lines):
+        return "divider"
+    return None
+
+
 def is_heading(line: str) -> bool:
     s = line.strip()
     if not s or len(s) > 90:
@@ -153,7 +204,7 @@ def _page_section(p: Page) -> Section:
     lines = [ln for ln in p.text.split("\n") if ln.strip()]
     first = lines[0].strip() if lines else ""
     if first and len(first.split()) <= 12:
-        title, body = first.lstrip("".join(SLIDE_TITLE_MARKS) + "#• ").strip(), lines[1:]
+        title, body = first.strip(BULLETS).strip(), lines[1:]
     else:
         title, body = f"Page {p.number}", lines
     return Section(title, "\n".join(body).strip(), p.number, p.number, [(p.number, ln) for ln in body])
@@ -166,6 +217,7 @@ def split_sections(pages: list[Page], max_tokens: int = MAX_TOKENS_PER_SECTION,
     per question batch and many more LLM calls."""
     pages = strip_boilerplate(pages)
     if is_slide_deck(pages):
+        pages = [p for p in pages if front_matter_kind(p) is None]
         raw = [_page_section(p) for p in pages if p.text.strip()]
         out = [x for s in raw for x in _split_long(s, max_tokens)]
         out = _merge_short(out, min_tokens, max_tokens)

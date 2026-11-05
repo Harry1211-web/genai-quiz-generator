@@ -16,7 +16,8 @@ class KeyPoint(BaseModel):
     """A key point that can be tested (the 'plan' step of prompt v3)."""
 
     point: str = Field(min_length=5, description="The key point, one sentence")
-    source_quote: str = Field(min_length=5, description="Verbatim quote from the document")
+    source_quote: str = Field(min_length=5,
+                              description="One sentence or bullet copied EXACTLY from the document")
     suggested_level: Level
 
 
@@ -28,9 +29,11 @@ class MCQ(BaseModel):
     question: str = Field(min_length=10)
     options: list[str] = Field(min_length=4, max_length=4)
     answer_index: int = Field(ge=0, le=3, description="Position of the correct option: 0=A ... 3=D")
-    explanation: str = Field(min_length=10)
+    explanation: str = Field(min_length=10,
+                             description="Why the answer is right and why each other option is wrong")
     level: Level
-    source_quote: str = Field(min_length=5, description="VERBATIM supporting sentence from the document")
+    source_quote: str = Field(min_length=5,
+                              description="Supporting sentence or bullet copied EXACTLY from the document")
     source_page: int | None = None
 
     @model_validator(mode="after")

@@ -23,8 +23,16 @@ from pathlib import Path
 from .dedupe import mark_duplicates
 from .export import to_csv, to_gift, to_json
 from .extract import Section, load_sections
-from .generate import STRATEGIES, GeneratedQuestion, generate_for_section, load_prompt, split_labels
-from .llm import LLM, from_env
+from .generate import (
+    STRATEGIES,
+    GeneratedQuestion,
+    gen_prompt_version,
+    generate_for_section,
+    load_prompt,
+    sections_version,
+    split_labels,
+)
+from .llm import DEFAULT_ROLES, LLM, model_for_role
 from .verify import rejection_report, verify_all
 
 GENERATED = "generated.jsonl"
@@ -95,10 +103,25 @@ def _check_meta(out_dir: Path, meta: dict, regenerate: bool) -> Path | None:
         old = json.loads(meta_path.read_text(encoding="utf-8"))
         diff = {k: (old.get(k), v) for k, v in meta.items() if old.get(k) != v}
         if diff:
-            raise SystemExit(f"{out_dir} holds results of a different run {diff}. Use another --out "
-                             "folder, or --regenerate to archive the old results and start a new run.")
+            raise SystemExit(f"{out_dir} holds results of a different run {diff} (gen_prompt = the generator "
+                             "prompt changed, sections = the extraction changed). Use another --out folder, "
+                             "or --regenerate to archive the old results and start a new run.")
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     return archived
+
+
+def drop_rejections(out_dir: Path, label: str) -> int:
+    """Forget the verification of questions rejected with `label` so the next run verifies them
+    again (e.g. after the quote check was fixed). Generation is never repeated. The previous file
+    is kept as verified.before-recheck.jsonl."""
+    path = out_dir / VERIFIED
+    rows = _read_jsonl(path)
+    keep = [r for r in rows if label not in (r.get("rejected") or "").split(";")]
+    if len(keep) == len(rows):
+        return 0
+    shutil.copyfile(path, out_dir / "verified.before-recheck.jsonl")
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in keep), encoding="utf-8")
+    return len(rows) - len(keep)
 
 
 def _import_legacy(legacy: Path, gen_path: Path, sections: list[Section], log: Callable[[str], None]) -> None:
@@ -207,20 +230,31 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=3, help="questions per section")
     ap.add_argument("--max-sections", type=int)
     ap.add_argument("--no-verify", action="store_true", help="skip the answer-back verification (cheaper)")
+    ap.add_argument("--generator", default=DEFAULT_ROLES["generator"],
+                    help="number of the model in .env (LLM_MODEL_<n>) that writes the questions")
+    ap.add_argument("--verifier", default=DEFAULT_ROLES["verifier"],
+                    help="number of the model in .env (LLM_MODEL_<n>) that re-answers them")
     ap.add_argument("--out", default="reports/output")
     ap.add_argument("--regenerate", "--fresh", dest="regenerate", action="store_true",
                     help="generate a NEW set of questions; previous results are moved to <out>/archive/")
     ap.add_argument("--reverify", action="store_true",
                     help="keep the generated questions but verify them again "
                          "(previous verification is archived)")
+    ap.add_argument("--recheck-quotes", action="store_true",
+                    help="verify again only the questions rejected as quote_not_found "
+                         "(after the quote check was improved); nothing is generated again")
     ap.add_argument("--quiet", action="store_true", help="do not print progress")
     a = ap.parse_args()
 
-    llm = from_env("LLM")
-    verifier = None if a.no_verify else from_env("VERIFY")
+    llm = model_for_role("generator", a.generator)
+    verifier = None if a.no_verify else model_for_role("verifier", a.verifier)
     out = Path(a.out)
+    sections = load_sections(a.file)
+    used = sections[: a.max_sections] if a.max_sections else sections
     archived = _check_meta(out, {"file": Path(a.file).name, "strategy": a.strategy, "n": a.n,
-                                 "max_sections": a.max_sections, "model": llm.name}, a.regenerate)
+                                 "max_sections": a.max_sections, "model": llm.name,
+                                 "gen_prompt": gen_prompt_version(a.strategy),
+                                 "sections": sections_version(used)}, a.regenerate)
     if archived:
         print(f"[regenerate] previous results moved to {archived}", file=sys.stderr)
     if a.reverify and not a.regenerate:
@@ -228,7 +262,9 @@ def main() -> None:
         if moved:
             print(f"[reverify] previous verification moved to {moved}; generated questions are reused",
                   file=sys.stderr)
-    sections = load_sections(a.file)
+    if a.recheck_quotes:
+        print(f"[recheck] {drop_rejections(out, 'quote_not_found')} quote_not_found questions will be "
+              "verified again", file=sys.stderr)
     print(f"{len(sections)} sections: " + ", ".join(s.title for s in sections[:8]), file=sys.stderr)
     qs, stats = run(sections, llm, verifier, a.n, a.strategy, a.max_sections,
                     log=_quiet if a.quiet else log_stderr, out_dir=out)

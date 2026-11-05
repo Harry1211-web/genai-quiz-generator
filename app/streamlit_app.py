@@ -8,7 +8,7 @@ import streamlit as st
 
 from quizgen.export import to_csv, to_gift, to_json
 from quizgen.extract import load_sections
-from quizgen.llm import from_env
+from quizgen.llm import model_for_role
 from quizgen.pipeline import run
 from quizgen.schema import MCQ
 
@@ -36,7 +36,7 @@ if up and st.button("Generate questions", type="primary"):
     sections = load_sections(f.name)
     Path(f.name).unlink(missing_ok=True)
     with st.spinner(f"Processing {min(len(sections), max_sections)} sections..."):
-        qs, stats = run(sections, from_env("LLM"), from_env("VERIFY") if verify else None,
+        qs, stats = run(sections, model_for_role("generator"), model_for_role("verifier") if verify else None,
                         n, strategy, max_sections)
     st.session_state["qs"] = [q.to_dict() for q in qs]
     st.session_state["stats"] = stats

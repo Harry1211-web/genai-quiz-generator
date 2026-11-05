@@ -136,17 +136,18 @@ def _fake_post(responses):
     return post, calls
 
 
-def test_unsupported_temperature_is_dropped(monkeypatch):
+def test_temperature_not_sent_to_api_models_by_default(monkeypatch):
     import httpx
 
-    from quizgen.llm import OpenAICompatLLM
+    from quizgen.llm import OpenAICompatLLM, build_llm
     ok = {"choices": [{"message": {"content": "{}"}}], "usage": {"prompt_tokens": 5, "completion_tokens": 1}}
-    bad = {"error": {"message": "Unsupported value: 'temperature' does not support 0.2 with this model."}}
-    post, calls = _fake_post([(400, bad), (200, ok)])
+    post, calls = _fake_post([(200, ok), (200, ok)])
     monkeypatch.setattr(httpx, "post", post)
-    llm = OpenAICompatLLM(model="m", api_key="k")
-    assert llm.chat([{"role": "user", "content": "json"}]) == "{}"
-    assert "temperature" in calls[0] and "temperature" not in calls[1] and not llm.send_temperature
+    OpenAICompatLLM(model="m", api_key="k").chat([{"role": "user", "content": "json"}], temperature=0.0)
+    assert "temperature" not in calls[0] and len(calls) == 1      # one call, no retry
+    llm = build_llm({"model": "m", "temperature": "true"})
+    llm.chat([{"role": "user", "content": "json"}], temperature=0.3)
+    assert calls[1]["temperature"] == 0.3                         # LLM_TEMPERATURE_<n>=true turns it on
 
 
 def test_other_400_shows_provider_message(monkeypatch):
@@ -158,3 +159,41 @@ def test_other_400_shows_provider_message(monkeypatch):
     with pytest.raises(LLMRequestError, match="does not exist"):
         OpenAICompatLLM(model="x", api_key="k").chat([{"role": "user", "content": "hi"}])
     assert len(calls) == 1   # 4xx is not retried
+
+
+# ---- extraction and prompt-version fixes (Sprint 2)
+def test_front_matter_slides_are_detected():
+    from quizgen.extract import Page, front_matter_kind
+    assert front_matter_kind(Page(1, "WELCOME TO\nCLOUD COMPUTING")) == "cover"
+    assert front_matter_kind(Page(2, "Storage Systems\nPART 07")) == "cover"
+    assert front_matter_kind(Page(3, "INTRODUCTION\nTopics\n1. Disks\n2. Arrays\n3. Backup")) == "agenda"
+    assert front_matter_kind(Page(3, "Mục tiêu\n• Hiểu cách lưu trữ dữ liệu\n• Mô tả RAID")) == "objectives"
+    content = Page(9, "❖ Benefits of RAID\n1. Faster reads: data is striped over disks.\n"
+                      "2. Fault tolerance: a mirror keeps a copy.\n3. Hot spare: replaces a failed disk.")
+    assert front_matter_kind(content) is None
+
+
+def test_prompt_and_sections_versions_change_with_their_inputs():
+    from quizgen.extract import Section
+    from quizgen.generate import gen_prompt_version, sections_version
+    assert gen_prompt_version("v1") != gen_prompt_version("v2") != gen_prompt_version("v3")
+    a = [Section("T", "text one", 1, 1)]
+    assert sections_version(a) == sections_version([Section("T", "text one", 1, 1)])
+    assert sections_version(a) != sections_version([Section("T", "text two", 1, 1)])
+
+
+def test_pdf_words_without_space_characters_are_split(tmp_path):
+    """A PDF that draws words with a visual gap but no space character (seen in a Vietnamese deck)."""
+    import pymupdf
+
+    from quizgen.extract import pdf_page_text
+    doc = pymupdf.open()
+    page = doc.new_page()
+    x = 72
+    for word in ["data", "center"]:  # the built-in test font has no Vietnamese glyphs
+        page.insert_text((x, 100), word, fontsize=20, fontname="helv")
+        x += pymupdf.get_text_length(word, fontname="helv", fontsize=20) + 8  # gap, no space char
+    path = tmp_path / "gap.pdf"
+    doc.save(path)
+    with pymupdf.open(path) as d:
+        assert "data center" in pdf_page_text(d[0])
