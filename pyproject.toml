@@ -7,3 +7,6 @@ pythonpath = ["."]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B"]
 ignore = ["B008"]  # FastAPI uses File(...)/Query(...) as default values
+[tool.ruff.lint.per-file-ignores]
+# notebook style: imports after sys.path setup, long plotting lines, several statements per line
+"notebooks/*.ipynb" = ["E402", "E501", "E702", "I001"]

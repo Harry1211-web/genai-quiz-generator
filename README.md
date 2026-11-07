@@ -2,27 +2,36 @@
 
 Generates multiple-choice questions (4 options, answer, explanation and a **verbatim source quote**) from
 lecture slides and PDFs, verifies them automatically before they reach the user, and **measures quality with
-numbers**: 2 models x 3 prompting strategies, blind human ratings on a 5-criterion rubric, and LLM-as-judge
-agreement with humans (Cohen's kappa). Supports English and Vietnamese lectures.
+numbers**: 3 prompting strategies scored by an LLM-as-judge on a 5-criterion rubric, with the judge itself
+checked by a known-defect test. Supports English and Vietnamese lectures.
 
-> Status: Sprint 1 (development run) is done - see below. The evaluation-set table is filled after Sprint 2.
+> Status: Sprint 2 (evaluation) is done - results below, details in [`reports/summary.md`](reports/summary.md).
 
 ![demo](reports/demo.gif)
 
 ## Results (evaluation set, Sprint 2)
 
-| Model x Prompt | Correct & grounded (%) | Plausible distractors (%) | Level match (%) | Auto-rejected (%) | Format errors | $/100 questions | s/lecture |
-|---|---|---|---|---|---|---|---|
-| gpt-6-luna x zero-shot | | | | | | | |
-| gpt-6-luna x few-shot | | | | | | | |
-| gpt-6-luna x plan -> generate | | | | | | | |
-| qwen3.5:4b x zero-shot | | | | | | | |
-| qwen3.5:4b x few-shot | | | | | | | |
-| qwen3.5:4b x plan -> generate | | | | | | | |
+Generator gpt-6-luna, verifier qwen3.5:4b (local, thinking off), judge gpt-6-luna. 153 questions per strategy.
 
-Judge-vs-human kappa per criterion: see `reports/quality_report.md`.
+| Strategy | Accepted by verification | Factual | Single correct | Plausible distractors | Level match | $ / 100 questions |
+|---|---|---|---|---|---|---|
+| v1 zero-shot | 96.7 % | 0.97 | 0.99 | 0.72 | 0.81 | 0.040 |
+| **v2 few-shot (chosen)** | 97.4 % | 1.00 | 0.99 | 0.67 | 0.85 | 0.039 |
+| v3 plan -> generate | 99.3 % | 0.99 | 0.99 | 0.68 | 0.88 | 0.065 |
 
-**Data split.** Development set (prompt tuning, few-shot examples, LoRA data): 5 chapters of a university Cloud
+Differences under ~0.1 are within run-to-run noise (measured by running the same prompts twice). v3's higher
+level match comes partly from choosing fewer *apply* questions; per level, v2 and v3 are equal and v3 costs 1.7x.
+
+**Judge check (known defects planted in questions it had rated 5/5):**
+
+| Judge | Wrong answer key | Two correct options | Absurd distractor | Question from another document | Wrong level label | Control kept 5/5 |
+|---|---|---|---|---|---|---|
+| gpt-6-luna | 30/30 | 30/30 | 30/30 | 30/30 | 30/30 | 29/30 |
+| qwen3.5:4b, thinking off | 4/15 | 7/15 | 1/15 | 14/15 | 11/15 | 13/15 |
+
+No human rating was done: agreement with a teacher on subtle cases is not measured.
+
+**Data split.** Development set (prompt tuning, few-shot examples, LoRA data): 4 chapters of a university Cloud
 Computing course. Evaluation set (used only for final numbers): 2 Data Structures slide decks and one LLM-security
 handbook. Course materials are copyrighted and are not included in this repository.
 
@@ -91,13 +100,19 @@ The new quote rule was also replayed offline on all 116 questions: it changed ex
 - With thinking mode on, qwen3.5:4b needs about 2 minutes per verification on a local machine.
 - Slides whose content is only an image are not covered: chapter 2 of the development set has 16 of 39 such slides.
 - Sprint 1 used a single chapter (116 questions): differences between strategies are trends, not significant results.
-- Few-shot examples come from the development set only, never from the evaluation set.
+- Few-shot examples come from other subjects (networking, databases, operating systems), never from the
+  development or evaluation documents.
+- No human rating in Sprint 2: the judge is checked with planted defects only, and it grades questions written
+  by the same model (self-preference not measured).
+- The 4B local model is a good verifier but not a usable judge without thinking; with thinking it needs ~20 minutes
+  per grading on the author's GPU.
 
 ## Architecture
 
 ```
 PDF / PPTX -> extract (PyMuPDF / python-pptx, Unicode NFC)
-           -> strip headers, footers and page numbers -> split by heading or slide, merge short parts (~300-1,500 tokens)
+           -> strip headers, footers, page numbers, cover / agenda / summary / closing slides
+           -> split by heading or slide, merge short parts (~300-1,500 tokens)
            -> [v1 zero-shot | v2 few-shot | v3 plan key points -> generate]   (JSON + Pydantic, self-repair on errors)
            -> shuffle options
            -> verify: quote exists in the document? answer leak? a second model re-answers from the excerpt only
@@ -115,6 +130,7 @@ PDF / PPTX -> extract (PyMuPDF / python-pptx, Unicode NFC)
 | `quizgen/export.py` | JSON, CSV, GIFT |
 | `eval/` | Experiment runner, rubric, LLM-as-judge, Cohen's kappa, quality report, SFT data builder |
 | `app/`, `api/` | Streamlit review UI, FastAPI `POST /generate` |
+| `notebooks/pipeline_walkthrough.ipynb` | Step-by-step visual walkthrough: pages -> sections -> generator -> verifier -> judge, cost per step, charts of a finished evaluation run |
 | `notebooks/lora_finetune_colab.py` | Optional LoRA fine-tuning of a small model |
 
 ## Quick start
@@ -126,6 +142,7 @@ cp .env.example .env                                   # without LLM_MODEL_<n>: 
 pytest -q
 python -m quizgen.pipeline data/samples/transport_layer_tcp_udp.md --n 2 --strategy v3
 streamlit run app/streamlit_app.py
+jupyter lab notebooks/pipeline_walkthrough.ipynb       # visual walkthrough (FakeLLM by default: free)
 uvicorn api.main:app --reload                          # POST /generate
 docker compose up --build                              # API on :8000, UI on :8501
 ```
@@ -143,9 +160,20 @@ so no configuration verifies its own output.
 cp eval/configs.example.json eval/configs.json         # 2 generators, each with the other model as verifier
 python -m eval.run_eval data/private/eval_set --n 3 --max-sections 1   # cheap trial run first
 python -m eval.run_eval data/private/eval_set --n 3
-# rate reports/eval/labeling_sheet.csv by hand following eval/rubric.md (blind: model/strategy hidden)
+# check the LLM-as-judge without human ratings (results in reports/eval/judge_check/judge_check.md)
+python -m eval.judge_check plant reports/eval --docs data/private/eval_set --judge 1 --n 30   # known defects
+python -m eval.judge_check cross reports/eval --docs data/private/eval_set --judge 2          # second judge
+# optional: rate reports/eval/labeling_sheet.csv by hand (eval/rubric.md), then
 python -m eval.report reports/eval
 ```
+
+**How the judge is checked.** No human rating was done (too slow for one person). Instead the judge is
+checked in two automatic ways: *known defects* - questions it rated 5/5 are broken on purpose (wrong answer
+key, two correct options, an absurd distractor, a question from another document, a wrong level label) and
+it must notice each defect, while unchanged control questions measure its false alarms and its
+consistency; *second judge* - another model grades the same questions and the agreement is measured. This
+shows whether the judge detects errors and how stable it is, but not whether it agrees with a human
+teacher: that remains a limitation.
 
 Both `quizgen.pipeline` and `eval.run_eval` are crash-safe: generation is saved after every section,
 verification and judging after every question. After a crash, a timeout or Ctrl+C, run the same command
@@ -158,25 +186,27 @@ again - finished work is skipped, so nothing is paid for twice. Ratings already 
 
 - [x] Real models: gpt-6-luna generates, qwen3.5:4b verifies
 - [x] Few-shot examples written by the author from the development set
-- [x] Development set (5 Cloud Computing chapters) and evaluation set (2 Data Structures decks + LLM-security handbook) fixed
+- [x] Development set (5 Cloud Computing chapters; the introduction chapter was dropped in Sprint 2) and evaluation set (2 Data Structures decks + LLM-security handbook) fixed
 - [x] v1, v2 and v3 run on chapter 4
 - [x] Manual review of rejected questions; 3 verification rules fixed and re-verified
 - [x] Crash-safe runs: progress saved after every step, `--regenerate` and `--reverify` without paying twice
 - [x] Run outputs (verbatim slide quotes) removed from git history and ignored
 - [ ] `pytest -q` passes locally (43 tests)
 - [ ] Pushed to GitHub, CI green
-- [ ] Qwen thinking mode turned off for verification, seconds per question re-measured
+- [x] Qwen thinking mode turned off for verification, seconds per question re-measured (13/13 same verdicts, ~15x faster)
 - [ ] 20-30 accepted questions read by hand (table above)
 - [ ] `scripts/check_sections.py` run on the other 4 development chapters and the 3 evaluation files
 - [ ] `quiz.gift.txt` checked (imported into Moodle if available)
 
 **Sprint 2 - evaluation**
 
-- [ ] Trial run on the evaluation set (`--max-sections 1`)
-- [ ] Full run: 2 generators x 3 strategies, each verified by the other model, judged by the same judge
-- [ ] At least 150 questions rated blind by hand; 30 rated by a second person (human-human kappa)
-- [ ] Quality table and judge-human kappa (`python -m eval.report`)
-- [ ] Streamlit demo GIF, README results table filled
+- [x] Development check of both generators (`reports/dev_check_v2`): gpt-6-luna kept as generator
+- [x] Fixes found by reading outputs: quote check, Vietnamese PDF spaces, cover / summary slides, Excel CSV, v3 level definitions
+- [x] Trial run on the evaluation set (`--max-sections 1`)
+- [x] Full run: gpt-6-luna x 3 strategies, verified by qwen3.5:4b, judged by gpt-6-luna (459 questions, $0.22)
+- [x] Judge checked with planted defects (`eval.judge_check plant`) - replaces human rating (too slow for one person)
+- [x] README results table and `reports/summary.md`
+- [ ] Streamlit demo GIF
 
 ## Design decisions
 

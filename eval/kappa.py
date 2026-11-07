@@ -17,6 +17,17 @@ import pandas as pd
 from quizgen.schema import RUBRIC_KEYS
 
 
+def read_sheet(path, **kw) -> pd.DataFrame:
+    """Read a CSV written by this project or saved again by Excel: with or without the UTF-8 BOM,
+    separated by commas or semicolons (Excel uses the separator of the Windows region settings)."""
+    return pd.read_csv(path, encoding="utf-8-sig", sep=None, engine="python", **kw)
+
+
+def write_sheet(df: pd.DataFrame, path) -> None:
+    """UTF-8 with BOM: without it Excel on Windows shows ’ — → as garbage (e.g. â€™)."""
+    df.to_csv(path, index=False, encoding="utf-8-sig")
+
+
 def cohen_kappa(a: list[int], b: list[int]) -> float:
     assert len(a) == len(b) and a, "both lists must have the same non-zero length"
     n = len(a)
@@ -41,4 +52,4 @@ def kappa_table(human: pd.DataFrame, judge: pd.DataFrame) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    print(kappa_table(pd.read_csv(sys.argv[1]), pd.read_csv(sys.argv[2])).to_markdown(index=False))
+    print(kappa_table(read_sheet(sys.argv[1]), read_sheet(sys.argv[2])).to_markdown(index=False))

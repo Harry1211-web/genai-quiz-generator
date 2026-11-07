@@ -11,8 +11,7 @@ import ast
 import json
 from pathlib import Path
 
-import pandas as pd
-
+from eval.kappa import read_sheet
 from quizgen.extract import load_sections
 from quizgen.generate import load_prompt
 from quizgen.schema import RUBRIC_KEYS
@@ -26,8 +25,8 @@ def main() -> None:
     ap.add_argument("--out", default="data/sft/train.jsonl")
     a = ap.parse_args()
     d = Path(a.eval_dir)
-    lab = pd.read_csv(d / "labeling_sheet.csv").dropna(subset=RUBRIC_KEYS)
-    q = pd.read_csv(d / "questions.csv")
+    lab = read_sheet(d / "labeling_sheet.csv").dropna(subset=RUBRIC_KEYS)
+    q = read_sheet(d / "questions.csv")
     good = lab[lab[RUBRIC_KEYS].sum(axis=1) == 5][["id"]].merge(q, on="id")
     good = good[~good["doc"].isin(a.exclude_docs)]
     secs = {(f, s.title): s for f in good["doc"].unique()

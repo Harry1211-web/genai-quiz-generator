@@ -41,6 +41,10 @@ def normalize(text: str) -> str:
     """Unicode NFC normalization (Vietnamese diacritics have two encodings), whitespace cleanup."""
     text = unicodedata.normalize("NFC", text)
     text = text.replace("­", "")  # soft hyphen
+    text = re.sub(r"[\x0b\x0c\u2028\u2029]", "\n", text)  # PowerPoint soft line break, page break
+    text = re.sub(r"[\u200b\u200c\u200d\u2060\ufeff]", "", text)  # zero-width characters
+    text = re.sub(r"[\ue000-\uf8ff]", "•", text)  # private-use glyphs of symbol fonts (Wingdings bullets)
+    text = re.sub(r"[\x00-\x08\x0e-\x1f\x7f]", " ", text)  # other control characters
     text = re.sub(r"-\n(?=\w)", "", text)  # re-join words hyphenated across lines
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -175,8 +179,34 @@ def front_matter_kind(p: Page) -> str | None:
         return "agenda"
     if words <= 120 and any(OBJECTIVES_LINE_RE.match(ln) for ln in lines):
         return "objectives"
-    if short and any(NUMBERED_RE.match(ln) for ln in lines):
-        return "divider"
+    if short and len(lines) <= 2 and any(NUMBERED_RE.match(ln) for ln in lines):
+        return "divider"  # e.g. "Part title / 1. History of cloud computing" (not a numbered content slide)
+    return None
+
+
+# Slides / pages at the END of a lecture that hold no new content: closing slide, summary, practice
+# exercises, references and links. Questions generated from them are about the lecture itself
+# ("Which approach does the summary suggest?"), not about the subject.
+CLOSING_RE = re.compile(r"^(thanks?( you)?( for watching)?|q\s*&\s*a|questions\??|end of (file|lecture)|"
+                        r"the end|cảm ơn|hỏi đáp|notes)$", re.IGNORECASE)
+BACK_TITLE_RE = re.compile(
+    r"^(summary|summary of (chapter|part|lecture|module) \w+|conclusions?|recap|wrap[- ]up|"
+    r"practice exercises|exercises|homework|references( (&|and) further reading)?|further reading|"
+    r"bibliography|visuali[sz]ing data structures|tổng kết|tóm tắt|kết luận|bài tập|"
+    r"tài liệu tham khảo)$", re.IGNORECASE)
+SECTION_NO_RE = re.compile(r"^\d+(\.\d+)*\.?\s+|\s*\(\d+/\d+\)\s*$")
+
+
+def back_matter_kind(p: Page) -> str | None:
+    """'closing', 'summary' (incl. exercises, references, links) or None."""
+    lines = [ln.strip().strip(BULLETS).strip() for ln in p.text.split("\n") if ln.strip().strip(BULLETS)]
+    if not lines:
+        return None
+    words = len(p.text.split())
+    if words <= 12 and any(CLOSING_RE.match(ln) for ln in lines):
+        return "closing"
+    if words <= 300 and BACK_TITLE_RE.match(SECTION_NO_RE.sub("", lines[0]).strip()):
+        return "summary"
     return None
 
 
@@ -217,12 +247,13 @@ def split_sections(pages: list[Page], max_tokens: int = MAX_TOKENS_PER_SECTION,
     per question batch and many more LLM calls."""
     pages = strip_boilerplate(pages)
     if is_slide_deck(pages):
-        pages = [p for p in pages if front_matter_kind(p) is None]
+        pages = [p for p in pages if front_matter_kind(p) is None and back_matter_kind(p) is None]
         raw = [_page_section(p) for p in pages if p.text.strip()]
         out = [x for s in raw for x in _split_long(s, max_tokens)]
         out = _merge_short(out, min_tokens, max_tokens)
         return [s for s in out if s.n_tokens >= 40]
 
+    pages = [p for p in pages if back_matter_kind(p) is None]  # references, notes, closing page
     lines: list[tuple[int, str]] = [(p.number, ln) for p in pages for ln in p.text.split("\n")]
     raw: list[Section] = []
     cur_title, cur_lines = "Introduction", []

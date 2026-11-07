@@ -113,3 +113,25 @@ def test_cost_table_includes_verifier_cost_and_totals():
     assert totals["total_cost_usd"] == pytest.approx(0.017)
     assert totals["by_config"] == {"luna": pytest.approx(0.012), "qwen-4b": pytest.approx(0.005)}
     assert list(quality["rejected_rate"]) == [0.1, 0.1]
+
+
+def test_update_sections_keeps_unchanged_sections_only(tmp_path):
+    import json
+
+    from eval.run_eval import prune_changed_sections
+    from quizgen.extract import Section
+
+    def q(i, k, title, ps, pe):
+        return {"section_index": i, "qid": f"{i}-{k}", "section": title, "page_start": ps, "page_end": pe}
+    gen = [q(0, 0, "A", 1, 2), q(1, 0, "B", 3, 4), q(2, 0, "Summary", 5, 6)]
+    for name, rows in (("generated.jsonl", gen),
+                       ("verified.jsonl", [{"qid": r["qid"], "rejected": ""} for r in gen]),
+                       ("judged.jsonl", [{"qid": r["qid"], "factual": 1} for r in gen])):
+        (tmp_path / name).write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    # new extraction: section B was trimmed (pages changed), the summary section disappeared
+    sections = [Section("A", "text", 1, 2), Section("B", "text", 3, 3)]
+    assert prune_changed_sections(tmp_path, sections, log=lambda m: None) == 2
+    for name in ("generated.jsonl", "verified.jsonl", "judged.jsonl"):
+        assert [json.loads(x)["qid"] for x in (tmp_path / name).read_text().splitlines()] == ["0-0"]
+    assert list((tmp_path / "archive").glob("*/generated.jsonl"))
+    assert prune_changed_sections(tmp_path, sections, log=lambda m: None) == 0

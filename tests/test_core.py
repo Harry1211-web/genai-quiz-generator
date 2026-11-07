@@ -197,3 +197,34 @@ def test_pdf_words_without_space_characters_are_split(tmp_path):
     doc.save(path)
     with pymupdf.open(path) as d:
         assert "data center" in pdf_page_text(d[0])
+
+
+def test_back_matter_slides_are_detected():
+    from quizgen.extract import Page, back_matter_kind
+    assert back_matter_kind(Page(40, "THANKS\nQ & A")) == "closing"
+    assert back_matter_kind(Page(41, "End of file")) == "closing"
+    assert back_matter_kind(Page(39, "11 Summary\nWe built a stack from an array")) == "summary"
+    assert back_matter_kind(Page(39, "7 Summary (2/2)\nTry to add more methods")) == "summary"
+    assert back_matter_kind(Page(42, "❖ Summary of Chapter 3\nTopics we covered")) == "summary"
+    assert back_matter_kind(Page(43, "8 Practice Exercises\nExercise #1: reverse a list")) == "summary"
+    assert back_matter_kind(Page(9, "Stack summary of operations\npush adds an item on top")) is None
+    assert back_matter_kind(Page(9, "❖ Thanks to virtualization, one server runs many machines")) is None
+
+
+def test_normalize_removes_odd_characters():
+    from quizgen.extract import normalize
+    out = normalize("Stack\x0bpush​ pop  item\x07end")
+    assert out == "Stack\npush pop • item end"
+
+
+def test_sheet_saved_by_excel_is_read(tmp_path):
+    """Excel saves 'CSV UTF-8' with a BOM, and may use ';' as the separator (region settings)."""
+    import pandas as pd
+
+    from eval.kappa import read_sheet, write_sheet
+    df = pd.DataFrame({"id": ["q1"], "question": ["Library’s size — big?"], "factual": [1]})
+    write_sheet(df, tmp_path / "a.csv")
+    assert (tmp_path / "a.csv").read_bytes()[:3] == b"\xef\xbb\xbf"
+    assert read_sheet(tmp_path / "a.csv").equals(df)
+    (tmp_path / "b.csv").write_bytes("﻿id;question;factual\nq1;Library’s size — big?;1\n".encode())
+    assert read_sheet(tmp_path / "b.csv").equals(df)

@@ -1,5 +1,8 @@
 -r requirements.txt
 pytest>=8
 ruff>=0.5
+# notebooks/pipeline_walkthrough.ipynb
+matplotlib>=3.8
+jupyterlab>=4
 # optional: better semantic dedup with embeddings (pulls ~500 MB of torch)
 # sentence-transformers>=3.0

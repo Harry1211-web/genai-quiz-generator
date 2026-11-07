@@ -52,3 +52,20 @@ def test_port_11434_selects_ollama_with_thinking_off(monkeypatch):
                          [("false", False), ("true", True), ("default", None), (False, False)])
 def test_parse_think(value, expected):
     assert parse_think(value) is expected
+
+
+def test_num_ctx_is_sent_and_a_cut_off_answer_is_reported(monkeypatch, capsys):
+    import httpx
+
+    from quizgen import llm as L
+    sent = {}
+
+    def fake_post(url, body, headers, timeout):
+        sent.update(body)
+        return httpx.Response(200, json={"message": {"content": "{}"}, "prompt_eval_count": 900,
+                                         "eval_count": 3196, "done_reason": "length"})
+    monkeypatch.setattr(L, "post_with_retries", fake_post)
+    m = L.build_llm({"MODEL": "qwen3.5:4b", "BASE_URL": "http://localhost:11434/v1", "NUM_CTX": "16384"})
+    m.chat([{"role": "user", "content": "hi"}])
+    assert sent["options"]["num_ctx"] == 16384
+    assert "cut off at 4096 tokens" in capsys.readouterr().err

@@ -51,10 +51,20 @@ from quizgen.llm import (
     model_for_role,
     model_from_env,
 )
-from quizgen.pipeline import _append, _read_jsonl, drop_rejections, log_stderr, run
+from quizgen.pipeline import (
+    GENERATED,
+    VERIFIED,
+    _append,
+    _read_jsonl,
+    archive_previous,
+    drop_rejections,
+    log_stderr,
+    run,
+)
 from quizgen.schema import RUBRIC_KEYS
 
 from .judge import judge_one
+from .kappa import read_sheet, write_sheet
 
 JUDGED = "judged.jsonl"
 CELL_STATS = "cell_stats.json"
@@ -121,6 +131,41 @@ def judge_cell(judge: LLM, qs, sections, cell: Path, log) -> dict[str, dict]:
     return done
 
 
+def prune_changed_sections(cell: Path, sections, log) -> int:
+    """After the extraction changed, keep the questions of the sections that did NOT change and forget
+    the others, so only the changed sections are generated again (and removed ones disappear).
+    A section is unchanged when its index, title and pages are the same. The previous files are
+    archived first. Use it when sections were removed or trimmed; after a change that alters the text
+    of every section (e.g. a new PDF text extractor), regenerate everything instead."""
+    sig = {i: (s.title, s.page_start, s.page_end) for i, s in enumerate(sections)}
+
+    def unchanged(r: dict) -> bool:
+        i = r.get("section_index")
+        if i not in sig:
+            return False
+        if r.get("empty"):
+            return r.get("section") == sig[i][0]
+        return (r.get("section"), r.get("page_start"), r.get("page_end")) == sig[i]
+
+    gen = _read_jsonl(cell / GENERATED)
+    keep = [r for r in gen if unchanged(r)]
+    if len(keep) == len(gen):
+        return 0
+    qids = {r.get("qid") for r in keep}
+    kept = {name: [r for r in _read_jsonl(cell / name) if r.get("qid") in qids]
+            for name in (VERIFIED, JUDGED)}
+    dest = archive_previous(cell, (GENERATED, VERIFIED, JUDGED))
+    for r in keep:
+        _append(cell / GENERATED, r)
+    for name, rows in kept.items():
+        for r in rows:
+            _append(cell / name, r)
+    dropped = sum(1 for r in gen if not unchanged(r) and not r.get("empty"))
+    log(f"[update-sections] {dropped} questions of changed or removed sections forgotten "
+        f"(previous files in {dest}); unchanged sections are kept")
+    return dropped
+
+
 def update_cell_stats(cell: Path, gen: tuple, ver: tuple, jud: tuple, n_questions: int,
                       n_accepted: int) -> dict:
     """Add this run's usage to the cell's running totals (resumed runs keep counting)."""
@@ -140,15 +185,15 @@ def merge_labeling_sheet(path: Path, new: pd.DataFrame, log=print) -> pd.DataFra
     were already rated, they are saved to labeling_sheet.orphaned.csv so no rating work is lost."""
     if not path.exists():
         return new.sample(frac=1, random_state=42)
-    old = pd.read_csv(path, dtype=str).fillna("")
+    old = read_sheet(path, dtype=str).fillna("")
     shutil.copyfile(path, path.with_suffix(".backup.csv"))
     gone = old[~old["id"].isin(new["id"])]
     rated_gone = gone[(gone[RUBRIC_KEYS] != "").any(axis=1)]
     if len(rated_gone):
         orphan_path = path.with_name("labeling_sheet.orphaned.csv")
-        prev = pd.read_csv(orphan_path, dtype=str).fillna("") if orphan_path.exists() else None
+        prev = read_sheet(orphan_path, dtype=str).fillna("") if orphan_path.exists() else None
         both = rated_gone if prev is None else pd.concat([prev, rated_gone]).drop_duplicates("id")
-        both.to_csv(orphan_path, index=False)
+        write_sheet(both, orphan_path)
         log(f"[sheet] {len(rated_gone)} rated questions no longer exist -> kept in {orphan_path.name}")
     kept = old[old["id"].isin(new["id"])]
     added = new[~new["id"].isin(old["id"])].sample(frac=1, random_state=42)
@@ -224,13 +269,18 @@ def main() -> None:
                          "(ratings already typed are kept)")
     ap.add_argument("--recheck-quotes", action="store_true",
                     help="verify again the questions rejected as quote_not_found (nothing is regenerated)")
+    ap.add_argument("--update-sections", action="store_true",
+                    help="after the extraction changed: keep questions of unchanged sections, generate only "
+                         "the changed ones (ratings of kept questions stay valid)")
     a = ap.parse_args()
     log = log_stderr
 
     configs = json.loads(Path(a.configs).read_text(encoding="utf-8")) if Path(a.configs).exists() else \
         [{"name": "fake-large", "generator": "fake", "verifier": "fake"},
          {"name": "fake-small", "generator": "fake", "verifier": "fake"}]
-    files = sorted(p for p in Path(a.docs).iterdir() if p.suffix.lower() in DOC_SUFFIXES)
+    # skip Office lock files ("~$name.pptx", created while the file is open) and hidden files
+    files = sorted(p for p in Path(a.docs).iterdir()
+                   if p.suffix.lower() in DOC_SUFFIXES and not p.name.startswith(("~$", ".")))
     exclude = re.compile(a.exclude_sections, re.IGNORECASE) if a.exclude_sections else None
     docs = {}
     for f in files:
@@ -264,11 +314,15 @@ def main() -> None:
                 cell.mkdir(parents=True, exist_ok=True)
                 meta_path = cell / "cell_meta.json"
                 old = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else meta
-                if old != meta:
-                    diff = {k: (old.get(k), v) for k, v in meta.items() if old.get(k) != v}
+                diff = {k: (old.get(k), v) for k, v in meta.items() if old.get(k) != v}
+                if diff and a.update_sections and set(diff) == {"sections"}:
+                    log(f"\n[update-sections] {cell}")
+                    prune_changed_sections(cell, secs, log)
+                elif diff:
                     sys.exit(f"{cell} was run with different settings {diff} (gen_prompt = the generator "
                              "prompt changed, sections = the extraction changed). "
-                             "Use --regenerate or another --out.")
+                             "Use --regenerate or another --out (or --update-sections if only the "
+                             "sections changed).")
                 meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
                 log(f"\n=== {cfg['name']} | {strat} | {fname} "
                     f"(generator: {llm.name}, verifier: {verifier.name})")
@@ -295,7 +349,7 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(rows)
     df = df[["id"] + [c for c in df.columns if c != "id"]]
-    df.to_csv(out / "questions.csv", index=False)
+    write_sheet(df, out / "questions.csv")
 
     # Human rating sheet: only verified questions, configuration hidden (blind rating)
     ok = df[df["rejected"].fillna("") == ""]
@@ -307,12 +361,12 @@ def main() -> None:
     for k in RUBRIC_KEYS:
         sheet[k] = ""
     merged = merge_labeling_sheet(out / "labeling_sheet.csv", sheet, log=log)
-    merged.to_csv(out / "labeling_sheet.csv", index=False)
-    ok[["id", "config", "strategy"]].to_csv(out / "key.csv", index=False)
+    write_sheet(merged, out / "labeling_sheet.csv")
+    write_sheet(ok[["id", "config", "strategy"]], out / "key.csv")
     if "judge_factual" in df:
         jl = df.dropna(subset=["judge_factual"])[["id"] + [f"judge_{k}" for k in RUBRIC_KEYS]]
         jl.columns = ["id"] + RUBRIC_KEYS
-        jl.astype({k: int for k in RUBRIC_KEYS}).to_csv(out / "judge_labels.csv", index=False)
+        write_sheet(jl.astype({k: int for k in RUBRIC_KEYS}), out / "judge_labels.csv")
 
     # Comparison tables per (config, strategy), summed over documents, + run totals
     quality, cost, totals = build_tables(pd.DataFrame(stats), df)

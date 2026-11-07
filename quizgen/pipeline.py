@@ -272,7 +272,7 @@ def main() -> None:
     (out / "all_questions.jsonl").write_text(
         "".join(json.dumps(q.to_dict(), ensure_ascii=False) + "\n" for q in qs), encoding="utf-8")
     (out / "quiz.json").write_text(to_json(good), encoding="utf-8")
-    (out / "quiz.csv").write_text(to_csv(good), encoding="utf-8")
+    (out / "quiz.csv").write_text(to_csv(good), encoding="utf-8-sig")  # BOM: Excel shows UTF-8 correctly
     (out / "quiz.gift.txt").write_text(to_gift(good), encoding="utf-8")
     (out / "stats.json").write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(stats, ensure_ascii=False, indent=2))

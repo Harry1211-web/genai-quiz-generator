@@ -140,13 +140,16 @@ class OllamaLLM:
     """Local model through Ollama's native API (http://localhost:11434/api/chat).
 
     think=False turns thinking off (supported by recent Ollama versions for thinking models);
-    think=None sends nothing and keeps the model's default. Local calls cost $0."""
+    think=None sends nothing and keeps the model's default. Local calls cost $0.
+    num_ctx: context window in tokens (prompt + answer + thinking). Ollama's default is small (a few
+    thousand tokens): with thinking on, a long reasoning can fill it and the JSON answer is cut off."""
 
     model: str
     base_url: str = "http://localhost:11434"
     think: bool | None = False
     json_mode: bool = True
     timeout: float = 300.0
+    num_ctx: int | None = None
     usage: Usage = field(default_factory=Usage)
 
     @property
@@ -167,6 +170,8 @@ class OllamaLLM:
         for _ in range(2):  # one automatic fix: drop "think" for models that do not support it
             body: dict = {"model": self.model, "messages": messages, "stream": False,
                           "options": {"temperature": temperature}}
+            if self.num_ctx:
+                body["options"]["num_ctx"] = self.num_ctx
             if self.think is not None:
                 body["think"] = self.think
             if json_mode and self.json_mode:
@@ -187,6 +192,10 @@ class OllamaLLM:
         self.usage.seconds += time.perf_counter() - t0
         self.usage.prompt_tokens += data.get("prompt_eval_count", 0)
         self.usage.completion_tokens += data.get("eval_count", 0)  # includes thinking tokens
+        if data.get("done_reason") == "length":
+            used = data.get("prompt_eval_count", 0) + data.get("eval_count", 0)
+            _warn(f"{self.model}: answer cut off at {used} tokens - the context window is full "
+                  f"(set LLM_NUM_CTX_<n>=16384 in .env, or turn thinking off)")
         return data["message"]["content"]
 
 
@@ -218,7 +227,7 @@ DEFAULT_ROLES = {"generator": 1, "verifier": 2, "judge": 1}
 
 MODEL_KEYS = ("MODEL", "BASE_URL", "API_KEY", "PRICE_IN", "PRICE_OUT",            # what .env normally holds
               "PROVIDER", "THINK", "TIMEOUT", "JSON_MODE", "REASONING_EFFORT",   # optional extras
-              "TEMPERATURE")
+              "TEMPERATURE", "NUM_CTX")
 
 
 def _load_env() -> None:
@@ -250,7 +259,8 @@ def build_llm(s: dict, name: str = "fake") -> LLM:
     if provider == "ollama":
         return OllamaLLM(model=model, base_url=base_url or "http://localhost:11434",
                          think=parse_think(s.get("THINK", "false")), json_mode=json_mode,
-                         timeout=float(s.get("TIMEOUT", 300)))
+                         timeout=float(s.get("TIMEOUT", 300)),
+                         num_ctx=int(s["NUM_CTX"]) if s.get("NUM_CTX") else None)
     return OpenAICompatLLM(model=model, base_url=base_url or "https://api.openai.com/v1",
                            api_key=s.get("API_KEY", ""), price_in=float(s.get("PRICE_IN", 0)),
                            price_out=float(s.get("PRICE_OUT", 0)),
@@ -307,10 +317,14 @@ def generate_json(llm: LLM, messages: list[dict], schema: type[T], temperature: 
             return schema.model_validate_json(extract_json(raw))
         except (ValidationError, ValueError) as e:
             llm.usage.format_errors += 1
+            err = str(e)[:1500]
             if attempt == max_retries:
                 llm.usage.format_failures += 1
+                try:  # kept so callers can show WHY the answer was rejected (e.g. eval.judge_check)
+                    llm.last_format_error = {"raw": raw[:2000], "error": err[:500]}
+                except AttributeError:
+                    pass
                 return None
-            err = str(e)[:1500]
             msgs = msgs + [
                 {"role": "assistant", "content": raw},
                 {"role": "user", "content": f"Your JSON is invalid:\n{err}\n"

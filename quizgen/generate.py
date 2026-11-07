@@ -118,8 +118,8 @@ def generate_for_section(llm: LLM, section: Section, n: int = 3, strategy: str =
     elif strategy == "v2":
         user = load_prompt("v2_fewshot.md").format(**fmt)
     elif strategy == "v3":
-        plan_prompt = load_prompt("v3_plan.md").format(k=n, title=section.title, text=section.text,
-                                                       schema=_schema(KeyPointList))
+        plan_prompt = load_prompt("v3_plan.md").format(k=n, levels=levels, title=section.title,
+                                                       text=section.text, schema=_schema(KeyPointList))
         plan = generate_json(llm, [system, {"role": "user", "content": plan_prompt}], KeyPointList,
                              temperature=0.0)
         if plan is None:

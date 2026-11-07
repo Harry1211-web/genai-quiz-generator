@@ -75,5 +75,5 @@ if "qs" in st.session_state:
     st.subheader(f"Export {len(kept)} questions")
     c = st.columns(3)
     c[0].download_button("JSON", to_json(kept), "quiz.json")
-    c[1].download_button("CSV", to_csv(kept), "quiz.csv")
+    c[1].download_button("CSV", "\ufeff" + to_csv(kept), "quiz.csv")  # BOM for Excel
     c[2].download_button("GIFT (Moodle)", to_gift(kept), "quiz.gift.txt")

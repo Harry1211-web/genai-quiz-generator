@@ -2,6 +2,11 @@
 Write <n>{n}</n> multiple-choice questions, ONE question for EACH key point below (in order),
 using the suggested level of each point. Do not ask about the same point twice.
 
+Cognitive levels:
+- remember: recall a definition or fact
+- understand: explain, compare, paraphrase
+- apply: use the knowledge in a new situation
+
 Key points:
 {points}
 
