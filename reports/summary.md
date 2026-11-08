@@ -59,35 +59,36 @@ No human rating was done (one person, ~150 questions = several sessions). The ju
 **known-defect test** (`eval.judge_check plant`): questions the judge had rated 5/5 were broken on purpose and
 graded again; unchanged control questions measure false alarms and consistency.
 
-| Defect (criterion that must become 0) | gpt-6-luna | qwen3.5:4b, thinking off | qwen3.5:4b, thinking on |
-|---|---|---|---|
-| Answer key moved to a distractor (`factual`) | **30 / 30** | 4 / 15 | 8 / 8 |
-| A distractor replaced by the correct option (`single_correct`) | **30 / 30** | 7 / 15 | - |
-| A distractor replaced by an absurd phrase (`distractors`) | **30 / 30** | 1 / 15 | - |
-| Question from another document (`answerable`) | **30 / 30** | 14 / 15 | - |
-| "remember" question labelled "apply" (`level_match`) | **30 / 30** | 11 / 15 | - |
-| Control: unchanged question still rated 5/5 | 29 / 30 | 13 / 15 | - |
-| Cost / time | $0.028 for 180 gradings | free, ~10 s per grading | free, **~20 min per grading** |
+| Defect (criterion that must become 0) | gpt-6-luna | qwen3.5:4b, thinking off |
+|---|---|---|
+| Answer key moved to a distractor (`factual`) | **30 / 30** | 4 / 15 |
+| A distractor replaced by the correct option (`single_correct`) | **30 / 30** | 7 / 15 |
+| A distractor replaced by an absurd phrase (`distractors`) | **30 / 30** | 1 / 15 |
+| Question from another document (`answerable`) | **30 / 30** | 14 / 15 |
+| "remember" question labelled "apply" (`level_match`) | **30 / 30** | 11 / 15 |
+| Control: unchanged question still rated 5/5 | 29 / 30 | 13 / 15 |
+| Cost / time | $0.028 for 180 gradings | free, ~10 s per grading |
 
 - gpt-6-luna detects every planted defect and is consistent with itself (one false alarm in 30). This is the
   evidence behind trusting its scores above.
 - The 4B local model without thinking is **not usable as a judge**, although it is a good verifier (choosing one
-  option). Thinking fixes the defects it was tested on, but needs 4,000-8,000 reasoning tokens, a 16k context
-  window and ~20 minutes per grading on the author's GPU: the run was stopped after 9 gradings.
+  option). The same test with thinking on was started but stopped: on the author's GPU it was far too slow to
+  finish, so it is not reported.
 - The second-judge comparison (`eval.judge_check cross`) was therefore not run: agreement with a judge that
   misses most planted defects would say nothing about the first judge.
 - **Not measured:** whether the judge agrees with a human teacher on subtle cases (a slightly weak distractor,
   an *understand* question written as *remember*). The planted defects are obvious ones.
 
-## Finding 3 - thinking mode depends on the task
+## Finding 3 - thinking mode is not needed for verification
 
 | Task (qwen3.5:4b) | Thinking off | Thinking on |
 |---|---|---|
 | Verify (pick the option the excerpt supports) | 13/13 same verdicts, 6.5-7.6 s | 13/13 same verdicts, 106-111 s (~15x) |
-| Judge (5 criteria incl. distractor quality) | misses most planted defects | detects them, ~20 min per grading, needs a larger context |
 
-With Ollama's default context, thinking filled the window and the JSON answer was cut off (3 x 4,096 tokens for
-one grading): the run failed silently until the context was raised. The code now warns when an answer is cut.
+Thinking was also tried for the judge task: with Ollama's default context the reasoning filled the window and the
+JSON answer was cut off (3 x 4,096 tokens for one grading) - the run failed silently until the context was raised.
+The code now warns when an answer is cut and accepts `LLM_NUM_CTX_<n>`. A full judge run with thinking was too
+slow on this hardware and is left for future work.
 
 ## Development set - which model should generate?
 

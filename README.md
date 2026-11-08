@@ -104,8 +104,8 @@ The new quote rule was also replayed offline on all 116 questions: it changed ex
   development or evaluation documents.
 - No human rating in Sprint 2: the judge is checked with planted defects only, and it grades questions written
   by the same model (self-preference not measured).
-- The 4B local model is a good verifier but not a usable judge without thinking; with thinking it needs ~20 minutes
-  per grading on the author's GPU.
+- The 4B local model is a good verifier but not a usable judge without thinking; a judge run with thinking was too
+  slow on the author's GPU and is not reported.
 
 ## Architecture
 
@@ -179,34 +179,6 @@ Both `quizgen.pipeline` and `eval.run_eval` are crash-safe: generation is saved 
 verification and judging after every question. After a crash, a timeout or Ctrl+C, run the same command
 again - finished work is skipped, so nothing is paid for twice. Ratings already typed into
 `labeling_sheet.csv` are kept when the sheet is rebuilt (a backup is written first).
-
-## Progress
-
-**Sprint 1 - controlled generation (development set)**
-
-- [x] Real models: gpt-6-luna generates, qwen3.5:4b verifies
-- [x] Few-shot examples written by the author from the development set
-- [x] Development set (5 Cloud Computing chapters; the introduction chapter was dropped in Sprint 2) and evaluation set (2 Data Structures decks + LLM-security handbook) fixed
-- [x] v1, v2 and v3 run on chapter 4
-- [x] Manual review of rejected questions; 3 verification rules fixed and re-verified
-- [x] Crash-safe runs: progress saved after every step, `--regenerate` and `--reverify` without paying twice
-- [x] Run outputs (verbatim slide quotes) removed from git history and ignored
-- [ ] `pytest -q` passes locally (43 tests)
-- [ ] Pushed to GitHub, CI green
-- [x] Qwen thinking mode turned off for verification, seconds per question re-measured (13/13 same verdicts, ~15x faster)
-- [ ] 20-30 accepted questions read by hand (table above)
-- [ ] `scripts/check_sections.py` run on the other 4 development chapters and the 3 evaluation files
-- [ ] `quiz.gift.txt` checked (imported into Moodle if available)
-
-**Sprint 2 - evaluation**
-
-- [x] Development check of both generators (`reports/dev_check_v2`): gpt-6-luna kept as generator
-- [x] Fixes found by reading outputs: quote check, Vietnamese PDF spaces, cover / summary slides, Excel CSV, v3 level definitions
-- [x] Trial run on the evaluation set (`--max-sections 1`)
-- [x] Full run: gpt-6-luna x 3 strategies, verified by qwen3.5:4b, judged by gpt-6-luna (459 questions, $0.22)
-- [x] Judge checked with planted defects (`eval.judge_check plant`) - replaces human rating (too slow for one person)
-- [x] README results table and `reports/summary.md`
-- [ ] Streamlit demo GIF
 
 ## Design decisions
 
