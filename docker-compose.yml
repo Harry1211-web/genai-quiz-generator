@@ -1,15 +1,25 @@
+# docker compose up --build          -> API on http://localhost:8000/docs, UI on http://localhost:8501
+# Models come from .env (LLM_MODEL_1, LLM_MODEL_2, ...). An Ollama server running on the host machine is
+# reached automatically ("localhost" is rewritten to host.docker.internal inside the containers).
 services:
   api:
     build: .
     env_file: .env
     ports: ["8000:8000"]
+    extra_hosts: ["host.docker.internal:host-gateway"]   # needed on Linux; built in on Docker Desktop
   ui:
     build: .
     env_file: .env
-    command: ["streamlit", "run", "app/streamlit_app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    command: ["streamlit", "run", "app/streamlit_app.py", "--server.port", "8501", "--server.address", "0.0.0.0",
+              "--browser.gatherUsageStats", "false"]
     ports: ["8501:8501"]
-  # Optional local model via Ollama. After start-up: docker compose exec ollama ollama pull qwen2.5:7b-instruct
-  # then set VERIFY_BASE_URL=http://ollama:11434/v1 in .env
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+  # Optional: Ollama inside Docker instead of on the host.
+  #   docker compose --profile local up --build
+  #   docker compose exec ollama ollama pull qwen3.5:4b
+  #   and in .env: LLM_BASE_URL_2=http://ollama:11434/v1
   ollama:
     image: ollama/ollama:latest
     profiles: ["local"]

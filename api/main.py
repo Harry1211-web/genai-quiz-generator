@@ -18,7 +18,7 @@ def health():
 
 
 @app.post("/generate")
-async def generate(file: UploadFile = File(...), strategy: str = Query("v3", pattern="^v[123]$"),
+async def generate(file: UploadFile = File(...), strategy: str = Query("v2", pattern="^v[123]$"),
                    n: int = Query(3, ge=1, le=5), max_sections: int = Query(6, ge=1, le=20),
                    verify: bool = True):
     suffix = Path(file.filename or "x.pdf").suffix.lower()

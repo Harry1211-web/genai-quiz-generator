@@ -13,7 +13,7 @@ aggregate numbers.
 | Generator | gpt-6-luna (model 1) |
 | Verifier | qwen3.5:4b via Ollama, thinking off (model 2) |
 | Judge | gpt-6-luna, 5-criterion 0/1 rubric (`eval/rubric.md`) - evaluation only, not part of the product |
-| Strategies | v1 zero-shot (rules only) · v2 few-shot (+ 5 examples from other subjects, + level definitions) · v3 plan -> generate (v2 + a planning call that picks key points, quotes and levels) |
+| Strategies | v1 zero-shot (rules + level definitions) · v2 few-shot (v1 + 5 examples from other subjects) · v3 plan -> generate (v2 + a planning call that picks key points, quotes and levels) |
 | Size | 3 questions per section: 153 questions per strategy, 459 in total |
 
 ## Results (evaluation set, judge scores)
@@ -38,7 +38,7 @@ as real.
 ## Finding 1 - one missing definition cost v3 twenty points
 
 v3's `level_match` was 0.65 and 0.67 in two full runs, against 0.82 and 0.85 for v2. Reading the prompts showed
-that v2 defined *remember / understand / apply* but v3 did not. After adding the same definitions to v3
+that v1 and v2 defined *remember / understand / apply* but v3 did not. After adding the same definitions to v3
 (hash `84c59b5d` -> `1378a2d8`), v3 reached **0.875**. The gap was larger than the run-to-run noise in both runs.
 
 **But v3 now scores higher partly because it chooses easier levels.** v1 and v2 follow the requested mix

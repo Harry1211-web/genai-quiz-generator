@@ -245,6 +245,15 @@ def model_settings(n: int | str) -> dict[str, str]:
     return {k: v for k in MODEL_KEYS if (v := os.getenv(f"LLM_{k}_{n}")) not in (None, "")}
 
 
+def in_docker_url(url: str) -> str:
+    """Inside the Docker image (QUIZGEN_IN_DOCKER=1), "localhost" is the container itself: a model
+    served on the host machine (Ollama) is reached through host.docker.internal instead. The same
+    .env file therefore works with and without Docker."""
+    if os.getenv("QUIZGEN_IN_DOCKER") == "1":
+        return re.sub(r"//(localhost|127\.0\.0\.1)(?=[:/]|$)", "//host.docker.internal", url)
+    return url
+
+
 def build_llm(s: dict, name: str = "fake") -> LLM:
     """Build a model from settings with the keys of MODEL_KEYS (lower or upper case).
     A base URL on port 11434 means a local Ollama server, called through its native API with
@@ -253,7 +262,7 @@ def build_llm(s: dict, name: str = "fake") -> LLM:
     model = s.get("MODEL", "fake")
     if model == "fake":
         return FakeLLM(name=name)
-    base_url = s.get("BASE_URL", "")
+    base_url = in_docker_url(s.get("BASE_URL", ""))
     provider = str(s.get("PROVIDER") or ("ollama" if ":11434" in base_url else "openai")).lower()
     json_mode = str(s.get("JSON_MODE", "true")).lower() == "true"
     if provider == "ollama":

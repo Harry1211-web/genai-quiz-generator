@@ -5,7 +5,8 @@ lecture slides and PDFs, verifies them automatically before they reach the user,
 numbers**: 3 prompting strategies scored by an LLM-as-judge on a 5-criterion rubric, with the judge itself
 checked by a known-defect test. Supports English and Vietnamese lectures.
 
-> Status: Sprint 2 (evaluation) is done - results below, details in [`reports/summary.md`](reports/summary.md).
+> Status: evaluation (Sprint 2) and packaging (Sprint 3: UI, API, Docker) are done - results below, details in
+> [`reports/summary.md`](reports/summary.md).
 
 ![demo](reports/demo.gif)
 
@@ -31,7 +32,7 @@ level match comes partly from choosing fewer *apply* questions; per level, v2 an
 
 No human rating was done: agreement with a teacher on subtle cases is not measured.
 
-**Data split.** Development set (prompt tuning, few-shot examples, LoRA data): 4 chapters of a university Cloud
+**Data split.** Development set (prompt and extraction tuning): 4 chapters of a university Cloud
 Computing course. Evaluation set (used only for final numbers): 2 Data Structures slide decks and one LLM-security
 handbook. Course materials are copyrighted and are not included in this repository.
 
@@ -85,13 +86,8 @@ The new quote rule was also replayed offline on all 116 questions: it changed ex
   questions below and by blind human rating in Sprint 2.
 - Verification with a 4B local model in thinking mode costs no money but takes about 2 minutes per question.
 
-**Manual check of accepted questions**
-
-| Strategy | Questions read | Wrong but accepted | Weak (e.g. obvious distractors) | Notes |
-|---|---|---|---|---|
-| v1 zero-shot | TBD | TBD | TBD | |
-| v2 few-shot | TBD | TBD | TBD | |
-| v3 plan -> generate | TBD | TBD | TBD | |
+**Wrong questions that the verifier accepts** are measured in Sprint 2 instead: the judge grades every accepted
+question, and the judge itself is checked with planted defects (see Results).
 
 ## Known limitations
 
@@ -128,10 +124,9 @@ PDF / PPTX -> extract (PyMuPDF / python-pptx, Unicode NFC)
 | `quizgen/verify.py` | Source-quote check, answer-leak check, answer-back verification |
 | `quizgen/dedupe.py` | Near-duplicate removal |
 | `quizgen/export.py` | JSON, CSV, GIFT |
-| `eval/` | Experiment runner, rubric, LLM-as-judge, Cohen's kappa, quality report, SFT data builder |
+| `eval/` | Experiment runner, rubric, LLM-as-judge, Cohen's kappa, quality report, judge check |
 | `app/`, `api/` | Streamlit review UI, FastAPI `POST /generate` |
 | `notebooks/pipeline_walkthrough.ipynb` | Step-by-step visual walkthrough: pages -> sections -> generator -> verifier -> judge, cost per step, charts of a finished evaluation run |
-| `notebooks/lora_finetune_colab.py` | Optional LoRA fine-tuning of a small model |
 
 ## Quick start
 
@@ -140,12 +135,17 @@ python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\a
 pip install -r requirements-dev.txt
 cp .env.example .env                                   # without LLM_MODEL_<n>: fake model, zero-cost dry run
 pytest -q
-python -m quizgen.pipeline data/samples/transport_layer_tcp_udp.md --n 2 --strategy v3
+python -m quizgen.pipeline data/samples/transport_layer_tcp_udp.md --n 2 --strategy v2
 streamlit run app/streamlit_app.py
 jupyter lab notebooks/pipeline_walkthrough.ipynb       # visual walkthrough (FakeLLM by default: free)
 uvicorn api.main:app --reload                          # POST /generate
 docker compose up --build                              # API on :8000, UI on :8501
+python scripts/record_demo.py                          # re-record reports/demo.gif (needs playwright)
 ```
+
+**Docker.** The containers read the same `.env` (passed with `env_file`, never copied into the image).
+`localhost` in a base URL is rewritten to `host.docker.internal`, so an Ollama server running on the host is
+used without changing `.env`; `.dockerignore` keeps `.env`, `data/private/` and `reports/` out of the build.
 
 `.env` declares each model once, by number: `LLM_MODEL_<n>`, `LLM_BASE_URL_<n>`, `LLM_API_KEY_<n>`,
 `LLM_PRICE_IN_<n>`, `LLM_PRICE_OUT_<n>`. Roles are not stored there: by default model 1 generates and judges and
@@ -179,6 +179,43 @@ Both `quizgen.pipeline` and `eval.run_eval` are crash-safe: generation is saved 
 verification and judging after every question. After a crash, a timeout or Ctrl+C, run the same command
 again - finished work is skipped, so nothing is paid for twice. Ratings already typed into
 `labeling_sheet.csv` are kept when the sheet is rebuilt (a backup is written first).
+
+## Progress
+
+**Sprint 1 - controlled generation (development set)**
+
+- [x] Real models: gpt-6-luna generates, qwen3.5:4b verifies
+- [x] Few-shot examples written by the author from the development set
+- [x] Development set (5 Cloud Computing chapters; the introduction chapter was dropped in Sprint 2) and evaluation set (2 Data Structures decks + LLM-security handbook) fixed
+- [x] v1, v2 and v3 run on chapter 4
+- [x] Manual review of rejected questions; 3 verification rules fixed and re-verified
+- [x] Crash-safe runs: progress saved after every step, `--regenerate` and `--reverify` without paying twice
+- [x] Run outputs (verbatim slide quotes) removed from git history and ignored
+- [x] Qwen thinking mode turned off for verification, seconds per question re-measured (13/13 same verdicts, ~15x faster)
+- [x] Accepted questions checked - done at scale in Sprint 2 (judge on every question + planted-defect test)
+- [x] Section splitting checked on every development chapter and evaluation file (Sprint 2)
+
+**Sprint 2 - evaluation**
+
+- [x] Development check of both generators (`reports/dev_check_v2`): gpt-6-luna kept as generator
+- [x] Fixes found by reading outputs: quote check, Vietnamese PDF spaces, cover / summary slides, Excel CSV, v3 level definitions
+- [x] Trial run on the evaluation set (`--max-sections 1`)
+- [x] Full run: gpt-6-luna x 3 strategies, verified by qwen3.5:4b, judged by gpt-6-luna (459 questions, $0.22)
+- [x] Judge checked with planted defects (`eval.judge_check plant`) - replaces human rating (too slow for one person)
+- [x] README results table and `reports/summary.md`
+
+**Sprint 3 - packaging**
+
+- [x] Streamlit app updated to the Sprint 2 pipeline (cost metric, v2 by default, model names, verifier reason)
+- [x] API defaults to v2; `/health` used by the Docker health check
+- [x] Docker: same `.env` with and without Docker, host Ollama reached through `host.docker.internal`,
+      `.dockerignore` keeps secrets and course documents out of the image
+- [x] Demo recorder `scripts/record_demo.py` (headless browser, public sample document only)
+- [x] 75 tests pass on Python 3.11 (CI and Docker version) and 3.13
+- [x] LoRA fine-tuning dropped: out of scope for this project (needs a GPU and a new training-data source)
+- [ ] Demo GIF recorded with the real models (`python scripts/record_demo.py`)
+- [ ] `docker compose up --build` run on the author's machine
+- [ ] Pushed to GitHub, CI green
 
 ## Design decisions
 

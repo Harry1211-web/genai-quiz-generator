@@ -35,3 +35,14 @@ def test_experiment_config_by_number(monkeypatch):
 def test_missing_model_falls_back_to_fake(monkeypatch):
     monkeypatch.delenv("LLM_MODEL_7", raising=False)
     assert isinstance(model_from_env(7), FakeLLM)
+
+
+def test_localhost_is_rewritten_only_inside_docker(monkeypatch):
+    from quizgen.llm import in_docker_url
+    monkeypatch.delenv("QUIZGEN_IN_DOCKER", raising=False)
+    assert in_docker_url("http://localhost:11434/v1") == "http://localhost:11434/v1"
+    monkeypatch.setenv("QUIZGEN_IN_DOCKER", "1")
+    assert in_docker_url("http://localhost:11434/v1") == "http://host.docker.internal:11434/v1"
+    assert in_docker_url("http://127.0.0.1:11434") == "http://host.docker.internal:11434"
+    assert in_docker_url("https://api.openai.com/v1") == "https://api.openai.com/v1"
+    assert in_docker_url("http://localhost.example.com/v1") == "http://localhost.example.com/v1"

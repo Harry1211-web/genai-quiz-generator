@@ -17,13 +17,16 @@ st.set_page_config(page_title="GenAI Quiz Generator", layout="wide")
 st.title("Generate review questions from a lecture")
 st.caption("Uploaded files are processed in this session only and are not stored.")
 
+generator, verifier_model = model_for_role("generator"), model_for_role("verifier")
+
 with st.sidebar:
-    strategy = st.selectbox("Prompting strategy", ["v3", "v2", "v1"],
-                            format_func=lambda s: {"v1": "v1 zero-shot", "v2": "v2 few-shot",
+    strategy = st.selectbox("Prompting strategy", ["v2", "v1", "v3"],
+                            format_func=lambda s: {"v1": "v1 zero-shot", "v2": "v2 few-shot (recommended)",
                                                    "v3": "v3 plan -> generate"}[s])
     n = st.slider("Questions per section", 1, 5, 3)
     max_sections = st.slider("Max sections", 1, 20, 6)
     verify = st.checkbox("Verify with a second model", value=True)
+    st.caption(f"Generator: `{generator.name}`  \nVerifier: `{verifier_model.name}`")
 
 up = st.file_uploader("Lecture (PDF, PPTX, TXT, MD)", type=["pdf", "pptx", "txt", "md"])
 if up and up.size > MAX_MB * 1024 * 1024:
@@ -36,8 +39,7 @@ if up and st.button("Generate questions", type="primary"):
     sections = load_sections(f.name)
     Path(f.name).unlink(missing_ok=True)
     with st.spinner(f"Processing {min(len(sections), max_sections)} sections..."):
-        qs, stats = run(sections, model_for_role("generator"), model_for_role("verifier") if verify else None,
-                        n, strategy, max_sections)
+        qs, stats = run(sections, generator, verifier_model if verify else None, n, strategy, max_sections)
     st.session_state["qs"] = [q.to_dict() for q in qs]
     st.session_state["stats"] = stats
 
@@ -47,7 +49,7 @@ if "qs" in st.session_state:
     c[0].metric("Generated", stats["total"])
     c[1].metric("Passed verification", stats["accepted"])
     c[2].metric("Time (s)", stats["seconds"])
-    c[3].metric("Cost (USD)", stats["cost_usd"])
+    c[3].metric("Cost (USD)", f"{stats.get('cost_usd_this_run', 0):.4f}")
     show_rejected = st.toggle("Show rejected questions", value=False)
     kept: list[MCQ] = []
     for i, d in enumerate(st.session_state["qs"]):
@@ -64,6 +66,8 @@ if "qs" in st.session_state:
                            format_func=lambda j: "ABCD"[j], horizontal=True)
             exp = st.text_area("Explanation", d["explanation"], key=f"e{i}")
             st.info(f"Source (page {d['source_page']}): “{d['source_quote']}”")
+            if d["rejected"] and d.get("verifier_reason"):
+                st.error(f"Verifier: {d['verifier_reason']}")
             keep = st.checkbox("Keep this question", value=not d["rejected"], key=f"k{i}")
         if keep:
             try:

@@ -1,0 +1,12 @@
+# never send secrets, course documents or results to the Docker build
+.env
+.env.*
+!.env.example
+data/private/
+reports/
+.git/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+notebooks/
+tests/
