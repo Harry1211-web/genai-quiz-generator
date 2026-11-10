@@ -180,43 +180,6 @@ verification and judging after every question. After a crash, a timeout or Ctrl+
 again - finished work is skipped, so nothing is paid for twice. Ratings already typed into
 `labeling_sheet.csv` are kept when the sheet is rebuilt (a backup is written first).
 
-## Progress
-
-**Sprint 1 - controlled generation (development set)**
-
-- [x] Real models: gpt-6-luna generates, qwen3.5:4b verifies
-- [x] Few-shot examples written by the author from the development set
-- [x] Development set (5 Cloud Computing chapters; the introduction chapter was dropped in Sprint 2) and evaluation set (2 Data Structures decks + LLM-security handbook) fixed
-- [x] v1, v2 and v3 run on chapter 4
-- [x] Manual review of rejected questions; 3 verification rules fixed and re-verified
-- [x] Crash-safe runs: progress saved after every step, `--regenerate` and `--reverify` without paying twice
-- [x] Run outputs (verbatim slide quotes) removed from git history and ignored
-- [x] Qwen thinking mode turned off for verification, seconds per question re-measured (13/13 same verdicts, ~15x faster)
-- [x] Accepted questions checked - done at scale in Sprint 2 (judge on every question + planted-defect test)
-- [x] Section splitting checked on every development chapter and evaluation file (Sprint 2)
-
-**Sprint 2 - evaluation**
-
-- [x] Development check of both generators (`reports/dev_check_v2`): gpt-6-luna kept as generator
-- [x] Fixes found by reading outputs: quote check, Vietnamese PDF spaces, cover / summary slides, Excel CSV, v3 level definitions
-- [x] Trial run on the evaluation set (`--max-sections 1`)
-- [x] Full run: gpt-6-luna x 3 strategies, verified by qwen3.5:4b, judged by gpt-6-luna (459 questions, $0.22)
-- [x] Judge checked with planted defects (`eval.judge_check plant`) - replaces human rating (too slow for one person)
-- [x] README results table and `reports/summary.md`
-
-**Sprint 3 - packaging**
-
-- [x] Streamlit app updated to the Sprint 2 pipeline (cost metric, v2 by default, model names, verifier reason)
-- [x] API defaults to v2; `/health` used by the Docker health check
-- [x] Docker: same `.env` with and without Docker, host Ollama reached through `host.docker.internal`,
-      `.dockerignore` keeps secrets and course documents out of the image
-- [x] Demo recorder `scripts/record_demo.py` (headless browser, public sample document only)
-- [x] 75 tests pass on Python 3.11 (CI and Docker version) and 3.13
-- [x] LoRA fine-tuning dropped: out of scope for this project (needs a GPU and a new training-data source)
-- [ ] Demo GIF recorded with the real models (`python scripts/record_demo.py`)
-- [ ] `docker compose up --build` run on the author's machine
-- [ ] Pushed to GitHub, CI green
-
 ## Design decisions
 
 See [`docs/DECISIONS.md`](docs/DECISIONS.md).
