@@ -95,16 +95,9 @@ class GeneratedQuestion:
                    warnings)
 
 
-WARNING_LABELS = {"answer_leak"}  # labels that used to reject a question and now only warn
-
-
 def split_labels(rejected: str | None, warnings: str | None = None) -> tuple[list[str], list[str]]:
-    """Parse saved ';'-joined labels. Results saved by older versions listed answer_leak as a
-    rejection; it is moved to the warnings so those questions are no longer rejected."""
-    rej = [r for r in (rejected or "").split(";") if r]
-    warn = [w for w in (warnings or "").split(";") if w]
-    warn += [r for r in rej if r in WARNING_LABELS and r not in warn]
-    return [r for r in rej if r not in WARNING_LABELS], warn
+    """Parse the saved ';'-joined rejection and warning labels."""
+    return ([r for r in (rejected or "").split(";") if r], [w for w in (warnings or "").split(";") if w])
 
 
 def generate_for_section(llm: LLM, section: Section, n: int = 3, strategy: str = "v3",

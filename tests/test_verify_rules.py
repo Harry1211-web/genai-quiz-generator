@@ -51,9 +51,10 @@ def test_answer_leak_is_a_warning_not_a_rejection():
     assert q.ok and q.warnings == ["answer_leak"]
 
 
-def test_old_results_with_answer_leak_are_no_longer_rejected():
-    assert split_labels("answer_leak") == ([], ["answer_leak"])
-    assert split_labels("answer_leak;answer_mismatch") == (["answer_mismatch"], ["answer_leak"])
+def test_saved_labels_are_parsed():
+    assert split_labels("answer_mismatch;duplicate", "answer_leak") == (["answer_mismatch", "duplicate"],
+                                                                        ["answer_leak"])
+    assert split_labels("", None) == ([], [])
 
 
 def test_verify_prompt_allows_paraphrases():

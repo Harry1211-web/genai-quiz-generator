@@ -38,7 +38,6 @@ from .verify import rejection_report, verify_all
 GENERATED = "generated.jsonl"
 VERIFIED = "verified.jsonl"
 META = "run_meta.json"
-LEGACY_CHECKPOINT = "generated_unverified.jsonl"  # written by an earlier version of this script
 
 
 def _quiet(msg: str) -> None:
@@ -70,7 +69,7 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 
 OUTPUT_FILES = ("all_questions.jsonl", "quiz.json", "quiz.csv", "quiz.gift.txt", "stats.json")
-RESULT_FILES = (GENERATED, VERIFIED, META, LEGACY_CHECKPOINT, *OUTPUT_FILES)
+RESULT_FILES = (GENERATED, VERIFIED, META, *OUTPUT_FILES)
 
 
 def verify_prompt_version() -> str:
@@ -124,24 +123,6 @@ def drop_rejections(out_dir: Path, label: str) -> int:
     return len(rows) - len(keep)
 
 
-def _import_legacy(legacy: Path, gen_path: Path, sections: list[Section], log: Callable[[str], None]) -> None:
-    """Convert questions saved by the older checkpoint format (no section index / qid) so they
-    can be resumed instead of being generated (and paid for) again."""
-    index = {s.title: i for i, s in enumerate(sections)}
-    per_section: dict[int, int] = {}
-    imported = 0
-    for r in _read_jsonl(legacy):
-        i = index.get(r.get("section"))
-        if i is None:
-            continue
-        k = per_section.get(i, 0)
-        per_section[i] = k + 1
-        r = {**r, "section_index": i, "qid": f"{i}-{k}", "rejected": ""}
-        _append(gen_path, r)
-        imported += 1
-    log(f"[resume] imported {imported} questions from {legacy.name} (older checkpoint format)")
-
-
 def run(sections: list[Section], llm: LLM, verifier: LLM | None = None, n_per_section: int = 3,
         strategy: str = "v3", max_sections: int | None = None, use_st: bool = True,
         seed: int = 0, log: Callable[[str], None] = _quiet,
@@ -156,8 +137,6 @@ def run(sections: list[Section], llm: LLM, verifier: LLM | None = None, n_per_se
     ver_path = out_dir / VERIFIED if out_dir else None
 
     # ---- generation (paid): resume from generated.jsonl, save after each section
-    if gen_path and not gen_path.exists() and (out_dir / LEGACY_CHECKPOINT).exists():
-        _import_legacy(out_dir / LEGACY_CHECKPOINT, gen_path, sections, log)
     saved = _read_jsonl(gen_path) if gen_path else []
     done_sections = {r["section_index"] for r in saved}
     qs = [GeneratedQuestion.from_dict(r) for r in saved if not r.get("empty")]

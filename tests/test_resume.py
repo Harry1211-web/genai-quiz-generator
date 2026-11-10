@@ -87,23 +87,6 @@ def test_mixing_runs_in_one_folder_is_refused(tmp_path):
         _check_meta(tmp_path, {"file": "a.pdf", "strategy": "v2"}, regenerate=False)
     _check_meta(tmp_path, {"file": "a.pdf", "strategy": "v2"}, regenerate=True)  # --regenerate allows it
 
-
-def test_legacy_checkpoint_is_imported(tmp_path):
-    """Questions saved by the older 'generated_unverified.jsonl' format are reused, not regenerated."""
-    secs = load_sections(SAMPLE)
-    first = tmp_path / "first"
-    qs, _ = run(secs, FakeLLM(), None, n_per_section=2, strategy="v1", use_st=False, out_dir=first)
-    legacy = tmp_path / "old"
-    legacy.mkdir()
-    new_keys = ("qid", "verifier_answer", "verifier_reason")
-    old_rows = [{k: v for k, v in q.to_dict().items() if k not in new_keys} for q in qs]
-    (legacy / "generated_unverified.jsonl").write_text("\n".join(json.dumps(r) for r in old_rows),
-                                                       encoding="utf-8")
-    gen2 = FakeLLM()
-    qs2, _ = run(secs, gen2, None, n_per_section=2, strategy="v1", use_st=False, out_dir=legacy)
-    assert gen2.usage.calls == 0 and len(qs2) == len(qs)
-
-
 def test_regenerate_archives_old_questions_and_generates_new_ones(tmp_path):
     from quizgen.pipeline import archive_previous
     secs = load_sections(SAMPLE)
