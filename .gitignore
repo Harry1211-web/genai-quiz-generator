@@ -2,6 +2,7 @@
 __pycache__/
 .env
 .env.*
+.markdown-collab/
 !.env.example
 *.pyc
 .pytest_cache/
@@ -13,6 +14,8 @@ _to_delete/
 # Whitelist only aggregate results you want to publish.
 reports/*
 !reports/.gitkeep
-!reports/demo.gif
 !reports/summary.md
 !reports/quality_report.md
+
+# editor / MCP tool state
+.markdown-collab/

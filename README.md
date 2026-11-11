@@ -8,8 +8,6 @@ checked by a known-defect test. Supports English and Vietnamese lectures.
 > Status: evaluation (Sprint 2) and packaging (Sprint 3: UI, API, Docker) are done - results below, details in
 > [`reports/summary.md`](reports/summary.md).
 
-![demo](reports/demo.gif)
-
 ## Results (evaluation set, Sprint 2)
 
 Generator gpt-6-luna, verifier qwen3.5:4b (local, thinking off), judge gpt-6-luna. 153 questions per strategy.
@@ -140,7 +138,6 @@ streamlit run app/streamlit_app.py
 jupyter lab notebooks/pipeline_walkthrough.ipynb       # visual walkthrough (FakeLLM by default: free)
 uvicorn api.main:app --reload                          # POST /generate
 docker compose up --build                              # API on :8000, UI on :8501
-python scripts/record_demo.py                          # re-record reports/demo.gif (needs playwright)
 ```
 
 **Docker.** The containers read the same `.env` (passed with `env_file`, never copied into the image).
